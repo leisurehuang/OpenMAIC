@@ -11,6 +11,60 @@ import { createLogger } from '@/lib/logger';
 
 const log = createLogger('AudioPlayer');
 
+/**
+ * A 44-byte 8 kHz mono WAV holding a single zero sample. Playing it is
+ * inaudible, but on Safari it is the standard way to unlock an audio element
+ * for later programmatic playback: unmuted `play()` outside a user gesture is
+ * rejected there (even seconds after an earlier click — Chrome only requires
+ * that the user interacted with the page at some point), and narration is
+ * played from async chains (IndexedDB reads, TTS fetches) that can never keep
+ * the gesture's call stack. Priming the element itself inside a gesture is
+ * what unlocks it; a primed element stays unlocked across later `src` swaps.
+ */
+const SILENT_PRIME_WAV_URL =
+  'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+
+/** Elements already primed inside some gesture; a WeakSet keeps the registry
+ * GC-friendly without touching element identity. */
+const primedElements = new WeakSet<object>();
+/** Live prime hooks, one per AudioPlayer instance with an element. */
+const primeHooks = new Set<() => void>();
+/** The window the gesture listeners are installed on, if any. */
+let unlockWindow: Window | undefined;
+
+/**
+ * Install the global gesture listeners once per window. Every
+ * `pointerdown`/`keydown` re-broadcasts: elements minted after the first
+ * gesture are caught by the next one, and hooks no-op in a microtask once
+ * their element is primed.
+ */
+function installUnlockListeners(): void {
+  if (typeof window === 'undefined' || unlockWindow === window) return;
+  unlockWindow = window;
+  const broadcast = (): void => {
+    for (const hook of primeHooks) hook();
+  };
+  for (const type of ['pointerdown', 'keydown'] as const) {
+    window.addEventListener(type, broadcast, { capture: true, passive: true });
+  }
+}
+
+/**
+ * Register a per-instance prime hook; returns its unsubscriber.
+ *
+ * The hook (not a bare element) is what gets registered because priming must
+ * consult the player's live playback state: an element holding a paused
+ * narration position has already played real audio — it is unlocked, and
+ * priming it would silently discard the resumable position.
+ */
+function registerAudioPrimeHook(hook: () => void): () => void {
+  primeHooks.add(hook);
+  installUnlockListeners();
+  return () => {
+    primeHooks.delete(hook);
+  };
+}
+
 /** How long a legacy narration URL fetch may take before the media element
  * fallback takes over. Bounded like the converter's URL probes: one stalled
  * endpoint must not pin a playback line indefinitely. */
@@ -31,7 +85,20 @@ async function resolveBytes(audioId: string): Promise<Blob | null> {
  * Audio player implementation
  */
 export class AudioPlayer {
+  /**
+   * The one element this player reuses for every narration. A fresh element
+   * per play would re-enter Safari's locked state each time (see
+   * {@link SILENT_PRIME_WAV_URL}); a persistent element keeps whatever unlock
+   * the first gesture granted it.
+   */
   private audio: HTMLAudioElement | null = null;
+  /**
+   * Whether the element holds narration state (playing or paused mid-line,
+   * not ended/stopped). This, not element existence, is what callers mean by
+   * "has active audio" now that the element persists.
+   */
+  private active = false;
+  private readonly unregisterPrimeHook: () => void;
   private onEndedCallback: (() => void) | null = null;
   private muted: boolean = false;
   private volume: number = 1;
@@ -66,14 +133,63 @@ export class AudioPlayer {
     if (this.blobUrl === blobUrl) this.blobUrl = null;
   }
 
+  /** The persistent element, minted (and gesture-primable) on first use. */
+  private ensureAudioElement(): HTMLAudioElement {
+    if (!this.audio) {
+      const element = new Audio();
+      element.preload = 'auto';
+      this.audio = element;
+    }
+    return this.audio;
+  }
+
+  /**
+   * Prime the element inside a user gesture if it is idle, so a later async
+   * `play()` is not rejected by Safari's autoplay policy. A no-op once primed,
+   * while narration is loaded, or when this browser imposes no such policy.
+   */
+  private primeIfIdle(): void {
+    const element = this.audio;
+    if (!element || this.active || primedElements.has(element)) return;
+    if (element.src === SILENT_PRIME_WAV_URL) return; // a prime is already in flight
+    element.src = SILENT_PRIME_WAV_URL;
+    const settle = (): void => {
+      primedElements.add(element);
+      if (element.src === SILENT_PRIME_WAV_URL) {
+        element.pause();
+        element.removeAttribute('src');
+      }
+    };
+    // Old Safari returns undefined from play(); both shapes settle the prime.
+    const started = element.play();
+    if (started && typeof started.then === 'function') {
+      started.then(settle, () => {
+        // The policy still blocks this element (or the decode failed); a
+        // later gesture retries — nothing is cached as unlocked.
+      });
+    } else {
+      settle();
+    }
+  }
+
+  constructor() {
+    // Mint the element eagerly: the first narration play() is always async
+    // (byte resolution first), so the ONLY chance to prime the element inside
+    // the starting gesture is for it to already exist when that gesture fires.
+    this.audio = new Audio();
+    this.audio.preload = 'auto';
+    this.unregisterPrimeHook = registerAudioPrimeHook(() => this.primeIfIdle());
+  }
+
   private stopAudioElement(): void {
     if (this.audio) {
       this.audio.pause();
       this.audio.currentTime = 0;
-      this.audio = null;
+      this.audio.onended = null;
     }
+    this.active = false;
     // Stop or replacement before natural end must not leak the fetched
-    // narration: the element is dropped here, so its URL is released with it.
+    // narration: the position is dropped here, so its URL is released with it.
     this.releaseBlobUrl(this.blobUrl);
   }
 
@@ -137,35 +253,38 @@ export class AudioPlayer {
         return false;
       }
 
-      // Stop current playback
+      // Stop current playback (the element itself persists — see class docs)
       this.stopAudioElement();
       if (requestToken !== this.requestToken) return false;
 
-      // Create audio element
-      this.audio = new Audio();
+      // Create/reuse audio element
+      const audio = this.ensureAudioElement();
 
       // Set audio source
       const blobUrl = blob ? URL.createObjectURL(blob) : undefined;
       this.blobUrl = blobUrl ?? null;
-      this.audio.src = blobUrl ?? (directUrl as string);
-      if (this.muted) this.audio.volume = 0;
-      else this.audio.volume = this.volume;
+      audio.src = blobUrl ?? (directUrl as string);
+      if (this.muted) audio.volume = 0;
+      else audio.volume = this.volume;
 
       // Apply playback rate
-      this.audio.defaultPlaybackRate = this.playbackRate;
-      this.audio.playbackRate = this.playbackRate;
+      audio.defaultPlaybackRate = this.playbackRate;
+      audio.playbackRate = this.playbackRate;
 
-      // Set ended callback
-      this.audio.addEventListener('ended', () => {
+      // Set ended callback. Property assignment, not addEventListener: the
+      // element is reused across plays, so a listener would stack once per
+      // narration; assignment replaces.
+      audio.onended = () => {
+        this.active = false;
         this.releaseBlobUrl(blobUrl);
         this.onEndedCallback?.();
-      });
+      };
 
       // Play. If play() rejects (autoplay policy, decode error, interrupted
-      // load) the 'ended' listener never fires, so revoke the blob URL here to
+      // load) the 'ended' handler never fires, so revoke the blob URL here to
       // avoid leaking it for the lifetime of the document.
       try {
-        await this.audio.play();
+        await audio.play();
       } catch (playError) {
         this.releaseBlobUrl(blobUrl);
         throw playError;
@@ -174,8 +293,9 @@ export class AudioPlayer {
         this.releaseBlobUrl(blobUrl);
         return false;
       }
+      this.active = true;
       // Re-apply after play() — some browsers reset during load
-      this.audio.playbackRate = this.playbackRate;
+      audio.playbackRate = this.playbackRate;
       return true;
     } catch (error) {
       log.error('Failed to play audio:', error);
@@ -211,7 +331,7 @@ export class AudioPlayer {
    * Resume playback
    */
   public resume(): void {
-    if (this.audio?.paused) {
+    if (this.active && this.audio?.paused) {
       this.audio.playbackRate = this.playbackRate;
       this.audio.play().catch((error) => {
         log.error('Failed to resume audio:', error);
@@ -223,7 +343,7 @@ export class AudioPlayer {
    * Get current playback status (actively playing, not paused)
    */
   public isPlaying(): boolean {
-    return this.audio !== null && !this.audio.paused;
+    return this.audio !== null && !this.audio.paused && this.active;
   }
 
   /**
@@ -231,21 +351,23 @@ export class AudioPlayer {
    * Used to decide whether to resume playback or skip to the next line
    */
   public hasActiveAudio(): boolean {
-    return this.audio !== null;
+    return this.active;
   }
 
   /**
    * Get current playback time (milliseconds)
    */
   public getCurrentTime(): number {
-    return this.audio ? this.audio.currentTime * 1000 : 0;
+    return this.active && this.audio ? this.audio.currentTime * 1000 : 0;
   }
 
   /**
    * Get audio duration (milliseconds)
    */
   public getDuration(): number {
-    return this.audio && !isNaN(this.audio.duration) ? this.audio.duration * 1000 : 0;
+    return this.active && this.audio && !isNaN(this.audio.duration)
+      ? this.audio.duration * 1000
+      : 0;
   }
 
   /**
@@ -291,6 +413,8 @@ export class AudioPlayer {
   public destroy(): void {
     this.stop();
     this.onEndedCallback = null;
+    this.unregisterPrimeHook();
+    this.audio = null;
   }
 }
 
