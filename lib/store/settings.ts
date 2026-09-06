@@ -390,12 +390,28 @@ export interface SettingsState {
   fetchServerProviders: () => Promise<void>;
 }
 
+/**
+ * Drop explicit-`undefined` members. JSON.stringify silently drops them, but
+ * the KV seam's plain-JSON gate (mirroring what a JSON backend can round-trip
+ * losslessly) rejects the whole write — surfacing as the "changes not saved"
+ * notice. Optional registry fields must therefore stay absent, not undefined.
+ */
+function omitUndefinedMembers<T extends Record<string, unknown>>(value: T): T {
+  const out: Record<string, unknown> = {};
+  for (const [key, member] of Object.entries(value)) {
+    if (member !== undefined) out[key] = member;
+  }
+  return out as T;
+}
+
 // Initialize default providers config
 const getDefaultProvidersConfig = (): ProvidersConfig => {
   const config: ProvidersConfig = {} as ProvidersConfig;
   Object.keys(PROVIDERS).forEach((pid) => {
     const provider = PROVIDERS[pid as ProviderId];
-    config[pid as ProviderId] = {
+    // Registry fields are optional (`defaultBaseUrl`, `icon`, …): strip the
+    // undefined ones instead of assigning them — see omitUndefinedMembers.
+    config[pid as ProviderId] = omitUndefinedMembers({
       apiKey: '',
       baseUrl: '',
       models: provider.models,
@@ -405,7 +421,7 @@ const getDefaultProvidersConfig = (): ProvidersConfig => {
       icon: provider.icon,
       requiresApiKey: provider.requiresApiKey,
       isBuiltIn: true,
-    };
+    });
   });
   return config;
 };
@@ -765,7 +781,7 @@ function ensureBuiltInProviders(state: Partial<SettingsState>): void {
       const customModels = (existing.models || []).filter((m) => !builtInModelIds.has(m.id));
       const mergedModels = [...provider.models, ...customModels];
 
-      state.providersConfig![providerId] = {
+      state.providersConfig![providerId] = omitUndefinedMembers({
         ...existing,
         models: mergedModels,
         name: existing.name || provider.name,
@@ -774,7 +790,7 @@ function ensureBuiltInProviders(state: Partial<SettingsState>): void {
         icon: provider.icon || existing.icon,
         requiresApiKey: existing.requiresApiKey ?? provider.requiresApiKey,
         isBuiltIn: existing.isBuiltIn ?? true,
-      };
+      });
     }
   });
 }
@@ -1480,15 +1496,17 @@ export const useSettingsStore = create<SettingsState>()(
             set((state) => {
               // Merge LLM providers
               const newProvidersConfig = { ...state.providersConfig };
-              // First reset all server flags
+              // First reset all server flags. `serverModels` must be cleared by
+              // removal, not by assigning undefined: an explicit `undefined`
+              // member fails the KV seam's plain-JSON validation (JSON would
+              // silently drop it), which rejects the whole settings write and
+              // surfaces to the user as the "changes not saved" notice.
               for (const pid of Object.keys(newProvidersConfig)) {
                 const key = pid as ProviderId;
-                if (newProvidersConfig[key]) {
-                  newProvidersConfig[key] = {
-                    ...newProvidersConfig[key],
-                    isServerConfigured: false,
-                    serverModels: undefined,
-                  };
+                const previous = newProvidersConfig[key];
+                if (previous) {
+                  const { serverModels: _cleared, ...rest } = previous;
+                  newProvidersConfig[key] = { ...rest, isServerConfigured: false };
                 }
               }
               // Set flags for server-configured providers
@@ -1523,7 +1541,10 @@ export const useSettingsStore = create<SettingsState>()(
                   newProvidersConfig[key] = {
                     ...newProvidersConfig[key],
                     isServerConfigured: true,
-                    serverModels: info.models,
+                    // Server-configured providers without a model list keep the
+                    // property absent rather than explicit undefined — see the
+                    // reset loop above for why.
+                    ...(info.models ? { serverModels: info.models } : {}),
                     models: filteredModels,
                   };
                 }

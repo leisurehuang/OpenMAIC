@@ -482,6 +482,53 @@ function isDeviceSafeKVStore(kv: KVStore): kv is DeviceSafeKVStore {
 }
 
 /**
+ * Realm-agnostic plain-object check, mirroring the JSON gate's own: only
+ * plain objects are safe to rebuild member-by-member.
+ */
+function isPlainObject(value: object): boolean {
+  const prototype = Object.getPrototypeOf(value) as object | null;
+  return prototype === null || Object.getPrototypeOf(prototype) === null;
+}
+
+/**
+ * Deep-drop members of plain objects (recursively) that JSON.stringify itself
+ * would silently drop — explicit `undefined` values and functions — leaving
+ * arrays and everything else untouched.
+ *
+ * zustand's default `partialize` hands the raw store state, whose optional
+ * members are naturally `undefined` (absent ≡ `undefined` for every reader
+ * via optional chaining) and whose action members are functions; registry-
+ * backed defaults additionally carry `undefined` at arbitrary depth. The KV
+ * seam's plain-JSON gate is right to reject Dates, Maps, symbols, and sparse
+ * arrays: those are real bugs a JSON backend must surface, not swallow. But
+ * `undefined` and function members are the store idiom colliding with the
+ * gate — `JSON.stringify` drops exactly those, which is what the pre-KV
+ * `localStorage` path persisted for years. Normalizing at this seam keeps
+ * the gate's teeth for genuinely non-JSON values while making the persisted
+ * bytes identical to what the JSON path always produced.
+ *
+ * Array *elements* are deliberately left alone: JSON maps them to `null`
+ * (`[undefined]` → `[null]`, functions likewise), which is lossy on read — a
+ * store holding such an array must not silently change shape in storage, so
+ * the gate rejecting it is correct.
+ */
+function dropMembersJsonDrops<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map(dropMembersJsonDrops) as unknown as T;
+  }
+  if (value !== null && typeof value === 'object' && isPlainObject(value)) {
+    const out: Record<string, unknown> = {};
+    for (const [key, member] of Object.entries(value)) {
+      if (member !== undefined && typeof member !== 'function') {
+        out[key] = dropMembersJsonDrops(member);
+      }
+    }
+    return out as unknown as T;
+  }
+  return value;
+}
+
+/**
  * Best-effort, fire-and-forget removal of a store's pre-cutover raw
  * `localStorage` entry (the value zustand's default storage used to write).
  *
@@ -534,12 +581,22 @@ export function createKVPersistStorage<S>(
     // requires a device-safe store, which is narrowed by its brand (the adapter
     // re-checks it at runtime). The app only wires `'account'` today; the
     // `'device'` arm keeps the generic helper honest.
-    if (scope === 'account') return kvPersistStorage<S>(kv, 'account');
-    if (isDeviceSafeKVStore(kv)) return kvPersistStorage<S>(kv, 'device');
-    throw new Error(
-      '@/lib/store/kv-persist: a device-scoped persist store requires a KV backend whose ' +
-        'device scope stays local (servesDeviceScopeLocally)',
-    );
+    let base: PersistStorageLike<S>;
+    if (scope === 'account') base = kvPersistStorage<S>(kv, 'account');
+    else if (isDeviceSafeKVStore(kv)) base = kvPersistStorage<S>(kv, 'device');
+    else
+      throw new Error(
+        '@/lib/store/kv-persist: a device-scoped persist store requires a KV backend whose ' +
+          'device scope stays local (servesDeviceScopeLocally)',
+      );
+    // Writes are normalized (see dropMembersJsonDrops) before the KV seam's
+    // JSON gate — the one place both the initial write and a recovery replay
+    // pass through.
+    return {
+      getItem: base.getItem,
+      setItem: (name, value) => base.setItem(name, dropMembersJsonDrops(value)),
+      removeItem: base.removeItem,
+    };
   };
 
   const states = new Map<string, KeyState<S>>();
