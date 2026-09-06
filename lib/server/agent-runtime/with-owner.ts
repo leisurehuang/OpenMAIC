@@ -14,7 +14,13 @@ export async function withRequestOwnerId(
   handler: (ownerId: string, responseHeaders: Headers) => Promise<Response>,
 ): Promise<Response> {
   const responseHeaders = new Headers();
-  const ownerId = resolveRequestOwnerId(req, responseHeaders);
+  const ownerId = await resolveRequestOwnerId(req, responseHeaders);
+  if (ownerId === undefined) {
+    return new Response(
+      JSON.stringify({ success: false, errorCode: 'UNAUTHENTICATED', error: 'Authentication required' }),
+      { status: 401, headers: { 'Content-Type': 'application/json', ...Object.fromEntries(responseHeaders) } },
+    );
+  }
   try {
     return await handler(ownerId, responseHeaders);
   } catch (error) {

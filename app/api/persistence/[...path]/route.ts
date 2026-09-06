@@ -20,6 +20,7 @@ import {
   getServerPersistenceProvider,
   type PersistencePoolFactory,
 } from '@/lib/persistence/server-provider';
+import { handleAccountKvRequest, isAccountKvPath } from '@/lib/persistence/account-kv';
 import { readStageMeta } from '@/lib/persistence/stage-meta';
 import { APP_RUNTIME_PAYLOAD_VALIDATORS } from '@/lib/runtime/payload-validators';
 import { withRequestOwnerId } from '@/lib/server/agent-runtime/with-owner';
@@ -283,6 +284,13 @@ export async function handlePersistenceRequest(
   return withRequestOwnerId(request, async (ownerId, responseHeaders) => {
     try {
       const path = routeRelativePath(request);
+
+      // account 作用域 KV（设置同步）：独立于 runtime/document 合约，按
+      // principal.learnerKey 分区，不参与 owner 解析。
+      if (isAccountKvPath(path)) {
+        return handleAccountKvRequest(request, path, connectionString);
+      }
+
       const action = parseDocumentAction(request.method, path);
       let access: DocumentAccess = 'allow';
       if (path === '/documents' || path.startsWith('/documents/')) {

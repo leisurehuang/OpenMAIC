@@ -345,9 +345,31 @@ export async function callLLM<T extends GenerateTextParams>(
       // Wrap in thinkingContext so the custom fetch wrapper in providers.ts
       // can read the config and inject vendor-specific body params for
       // OpenAI-compatible providers.
-      const result = await thinkingContext.run(effectiveThinking, () =>
-        generateText(injectedParams),
-      );
+      //
+      // [deployment patch] LLM_GENERATE_VIA_STREAM: run non-streaming calls
+      // through `streamText` under the hood. Some OpenAI-compatible gateways
+      // (e.g. Zhipu GLM) close connections whose response has not started
+      // after ~150s; a long `generateText` (interactive scene HTML etc.)
+      // produces its first byte only when the model finishes, so it gets cut
+      // ("other side closed") whenever generation exceeds that window. SSE
+      // bytes flow from the first token, keeping the connection alive; the
+      // awaited text is identical. Callers consume `.text` only.
+      const viaStream = /^(1|true)$/i.test(process.env.LLM_GENERATE_VIA_STREAM ?? '');
+      const result = await thinkingContext.run(effectiveThinking, async () => {
+        if (!viaStream) return generateText(injectedParams);
+        const stream = streamText(injectedParams as unknown as StreamTextParams);
+        const [text, totalUsage, finishReason] = await Promise.all([
+          stream.text,
+          stream.totalUsage,
+          stream.finishReason,
+        ]);
+        return {
+          text,
+          usage: totalUsage,
+          totalUsage,
+          finishReason,
+        } as unknown as GenerateTextResult<any, any>;
+      });
 
       // Record before validating: every attempt that got this far was billed,
       // including one that fails validation below and one that is handed back

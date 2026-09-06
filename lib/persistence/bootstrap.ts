@@ -16,16 +16,58 @@ export function isBrowserPersistenceEnabled(): boolean {
   return typeof window !== 'undefined' && process.env.NEXT_PUBLIC_PERSISTENCE === '1';
 }
 
+/**
+ * Build-time opt-in for single-library deployments: when set, every browser
+ * resolves the same learner partition instead of a per-device anonymous key,
+ * so account-scoped settings (provider/model configuration) sync across the
+ * trusted learning group. Must be empty for per-learner deployments.
+ */
+function sharedLearnerKeyOverride(): string | undefined {
+  const raw = process.env.NEXT_PUBLIC_SHARED_LEARNER_KEY;
+  return raw?.trim() || undefined;
+}
+
+/**
+ * 登录认证模式（NEXT_PUBLIC_AUTH_REQUIRED 编译期开关）：学习者分区来自
+ * 服务端验证的会话（/api/auth/me），设置跟随登录用户而非浏览器——
+ * 同一账户在不同设备上看到同一套配置。优先级：登录用户 > 共享键 > 匿名设备键。
+ */
+function loginLearnerKey(): Promise<string | undefined> {
+  const enabled = /^(1|true)$/i.test((process.env.NEXT_PUBLIC_AUTH_REQUIRED ?? '').trim());
+  if (!enabled) return Promise.resolve(undefined);
+  authLearnerKeyPromise ??= fetch('/api/auth/me', { credentials: 'include' })
+    .then(async (res) => {
+      if (!res.ok) return undefined;
+      const body = (await res.json().catch(() => null)) as
+        | { user?: { id?: string; name?: string; learnerKey?: string } | null }
+        | null;
+      const learnerKey = body?.user?.learnerKey;
+      return typeof learnerKey === 'string' && learnerKey ? learnerKey : undefined;
+    })
+    .catch(() => undefined);
+  return authLearnerKeyPromise;
+}
+
+let authLearnerKeyPromise: Promise<string | undefined> | undefined;
+
 export function getPersistenceLearnerKey(): Promise<string> {
   if (!isBrowserPersistenceEnabled()) {
     return Promise.reject(new Error('Browser persistence is not enabled'));
   }
-  return (learnerKeyPromise ??= getLearnerKey((deviceKv ??= new BrowserKVStore())).catch(
+  if (learnerKeyPromise) return learnerKeyPromise;
+  learnerKeyPromise = (async () => {
+    const loginKey = await loginLearnerKey();
+    if (loginKey) return loginKey;
+    const shared = sharedLearnerKeyOverride();
+    if (shared) return shared;
+    return getLearnerKey((deviceKv ??= new BrowserKVStore()));
+  })().catch(
     (error) => {
       learnerKeyPromise = undefined;
       throw error;
     },
-  ));
+  );
+  return learnerKeyPromise;
 }
 
 export async function getPersistenceRequestHeaders(): Promise<Record<string, string>> {

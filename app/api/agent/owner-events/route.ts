@@ -46,7 +46,10 @@ export async function GET(req: NextRequest) {
   // created under authenticated identities would be unreachable by their own
   // owner.
   const responseHeaders = new Headers();
-  const ownerId = resolveRequestOwnerId(req, responseHeaders);
+  const ownerId = await resolveRequestOwnerId(req, responseHeaders);
+  if (ownerId === undefined) {
+    return new Response('Authentication required', { status: 401, headers: responseHeaders });
+  }
   const store = await getAgentSessionStore();
 
   const url = new URL(req.url);

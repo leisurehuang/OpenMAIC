@@ -11,6 +11,8 @@ services:
         - ALLOWED_FRAME_ANCESTORS=${ALLOWED_FRAME_ANCESTORS:-}
         - NEXT_PUBLIC_PERSISTENCE=${NEXT_PUBLIC_PERSISTENCE:-}
         - NEXT_PUBLIC_PERSISTENCE_TOKEN=${NEXT_PUBLIC_PERSISTENCE_TOKEN:-}
+        - NEXT_PUBLIC_SHARED_LEARNER_KEY=${NEXT_PUBLIC_SHARED_LEARNER_KEY:-}
+        - NEXT_PUBLIC_AUTH_REQUIRED=${NEXT_PUBLIC_AUTH_REQUIRED:-}
         - NEXT_PUBLIC_MAIC_EDITOR_ENABLED=${NEXT_PUBLIC_MAIC_EDITOR_ENABLED:-}
         - NEXT_PUBLIC_MAIC_EDITOR_RENDERER_ENABLED=${NEXT_PUBLIC_MAIC_EDITOR_RENDERER_ENABLED:-}
         - NEXT_PUBLIC_MAIC_PLAYBACK_RENDERER_ENABLED=${NEXT_PUBLIC_MAIC_PLAYBACK_RENDERER_ENABLED:-}
@@ -20,7 +22,7 @@ services:
         - NEXT_PUBLIC_VIDEO_EXPORT_CTA_DESTINATION=${NEXT_PUBLIC_VIDEO_EXPORT_CTA_DESTINATION:-}
         - NEXT_PUBLIC_ENABLE_PPTX_IMPORT=${NEXT_PUBLIC_ENABLE_PPTX_IMPORT:-}
     ports:
-      - '3000:3000'
+      - '3456:3000'
     env_file:
       - .env.local
     environment:
@@ -36,8 +38,8 @@ services:
       - render # reach the render service over the isolated network
     volumes:
       # Optional: mount server-providers.yml for provider config
-      # - ./server-providers.yml:/app/server-providers.yml:ro
-      - openmaic-data:/app/data
+      - ./server-providers.yml:/app/server-providers.yml:ro
+      - ./data:/app/data
     restart: unless-stopped
 
   # Optional PostgreSQL backing for the app-embedded persistence API.
@@ -60,7 +62,7 @@ services:
       retries: 10
       start_period: 5s
     volumes:
-      - openmaic-postgres:/var/lib/postgresql/data
+      - ./postgres-data:/var/lib/postgresql/data
     restart: unless-stopped
 
   # Isolated MP4 render service (Node 22 + Chromium + FFmpeg) for classroom video
@@ -88,6 +90,7 @@ services:
       - NET_ADMIN
     environment:
       - PORT=9000
+      - ALLOW_LOCAL_NETWORKS=true
       # The standard CPU profile prefers BeginFrame but permits producer's
       # compatibility fallback (for example iframe GenUI). It still fixes one
       # producer worker, one render, and one extraction. Select low-memory to
@@ -141,7 +144,3 @@ networks:
   # can't use this shared network to reach the app.
   render:
     internal: true
-
-volumes:
-  openmaic-data:
-  openmaic-postgres:

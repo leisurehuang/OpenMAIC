@@ -74,7 +74,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // integration must thread `authenticatedOwnerId` through here, or sessions
   // created under authenticated identities would be unreachable by their own
   // owner.
-  const ownerId = resolveRequestOwnerId(req, responseHeaders);
+  const ownerId = await resolveRequestOwnerId(req, responseHeaders);
+  if (ownerId === undefined) {
+    return new Response('Authentication required', { status: 401, headers: responseHeaders });
+  }
   const store = await getAgentSessionStore();
   const meta = await store.getSession(id);
   if (!meta) {

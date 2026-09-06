@@ -32,7 +32,6 @@
  * The states and transitions are tabulated on {@link KeyState}.
  */
 import {
-  BrowserKVStore,
   kvPersistStorage,
   type DeviceSafeKVStore,
   type KVScope,
@@ -42,6 +41,7 @@ import {
 import type { PersistStorage, StorageValue } from 'zustand/middleware';
 
 import { createLogger } from '@/lib/logger';
+import { createDefaultAppKVStore } from '@/lib/persistence/browser-kv';
 import { reportPersistHealth } from '@/lib/store/persist-health';
 
 const log = createLogger('KVPersist');
@@ -470,7 +470,10 @@ function ambientLocalStorage(): Storage | null {
 function resolveKv(deps: KVPersistDeps): KVStore | null {
   if (deps.kv) return deps.kv;
   if (!ambientLocalStorage()) return null;
-  return (defaultKv ??= new BrowserKVStore());
+  // 默认后端：服务端持久化启用时 account 作用域走服务器（HttpKVStore），
+  // 否则纯本地（BrowserKVStore）。每次调用时解析，各 store 的模块在 SSR
+  // 中也会加载，彼时绑定后端没有意义。
+  return (defaultKv ??= createDefaultAppKVStore());
 }
 
 /** True when a KV backend keeps its `device` scope on the machine. */

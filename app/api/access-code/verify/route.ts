@@ -34,7 +34,10 @@ export async function POST(request: Request) {
     sameSite: 'lax',
     path: '/',
     maxAge: 60 * 60 * 24 * 7, // 7 days
-    secure: process.env.NODE_ENV === 'production',
+    // Secure cookies are silently dropped by browsers on plain-HTTP origins,
+    // which breaks the gate on self-hosted HTTP deployments. Default off;
+    // opt in when serving over HTTPS by setting COOKIE_SECURE=true.
+    secure: process.env.COOKIE_SECURE === 'true',
   });
 
   return apiSuccess({ valid: true });

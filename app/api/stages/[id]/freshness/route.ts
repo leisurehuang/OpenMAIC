@@ -47,7 +47,11 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
   const responseHeaders = new Headers();
-  const ownerId = resolveRequestOwnerId(req, responseHeaders);
+  const ownerId = await resolveRequestOwnerId(req, responseHeaders);
+  if (ownerId === undefined) {
+    // 登录认证开启且会话无效：owner 解析层拒绝，此处转为 401。
+    return new Response('Authentication required', { status: 401, headers: responseHeaders });
+  }
   const { id: stageId } = await params;
 
   // Existence-gated, exactly like the manifest route: the owner-bound store

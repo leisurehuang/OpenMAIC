@@ -15,6 +15,28 @@ export async function register(): Promise<void> {
   // want; the persistence stack is Node-only.
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
 
+  // Node's built-in fetch (undici) drops requests whose response headers
+  // haven't arrived within the default 300s. Non-streaming LLM calls (GLM and
+  // friends) can legitimately exceed that on long course-content generations,
+  // surfacing as `AI_APICallError: Headers Timeout Error`. Raise the ceiling
+  // for every fetch the app makes. npm-undici's setGlobalDispatcher stores the
+  // dispatcher under a Symbol.for key that Node's built-in fetch reads too, so
+  // this one call covers global fetch as well. `0` disables the timeout; we
+  // keep a high finite ceiling (30 min) so a wedged call still errors out.
+  try {
+    const { setGlobalDispatcher, Agent } = await import(
+      /* webpackIgnore: true */ 'undici'
+    );
+    setGlobalDispatcher(
+      new Agent({
+        headersTimeout: 30 * 60 * 1000,
+        bodyTimeout: 30 * 60 * 1000,
+      }),
+    );
+  } catch (error) {
+    console.error('[instrumentation] Failed to raise undici fetch timeouts', error);
+  }
+
   // Imported dynamically so the Edge bundle never pulls in `pg`.
   const { startAssetCollectorSchedule } =
     await import('@/lib/persistence/asset-collector-schedule');
@@ -27,6 +49,20 @@ export async function register(): Promise<void> {
   // backed provider config it reads.
   const { validateServerConfig } = await import('@/lib/server/config-validation');
   validateServerConfig();
+
+  // 登录认证：开机即建 auth_users / auth_sessions 表（CREATE TABLE IF NOT
+  // EXISTS，幂等）。失败只降级为启动日志，路由层还有懒建兜底。
+  if (process.env.DATABASE_URL?.trim()) {
+    try {
+      const { ensureAuthSchema } = await import('@/lib/server/auth');
+      const { getServerPersistenceProvider } =
+        await import('@/lib/persistence/server-provider');
+      const { pool } = await getServerPersistenceProvider(process.env.DATABASE_URL.trim());
+      await ensureAuthSchema(pool);
+    } catch (error) {
+      console.error('[instrumentation] Auth schema init deferred', error);
+    }
+  }
 
   let runner: import('@/lib/server/agent-runtime/runner').AgentRunnerHandle | undefined;
   let extractionRunner:

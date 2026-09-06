@@ -100,6 +100,17 @@ export function authenticatePersistenceHeaders(headers: Headers): PersistencePri
 export async function authenticatePersistenceRequest(
   req: IncomingMessage,
 ): Promise<PersistencePrincipal | undefined> {
+  // Login auth replaces the dev-token scheme: the learner partition comes
+  // from the database-verified session (server-controlled), never from a
+  // client-supplied header. Assets stay in the single shared partition.
+  const { isAuthRequired, resolveSessionUserFromCookieValue } = await import('@/lib/server/auth');
+  if (isAuthRequired()) {
+    const user = await resolveSessionUserFromCookieValue(
+      singleHeader(req.headers.cookie)?.match(/(?:^|;\s*)openmaic_session=([^;\s]+)/)?.[1],
+    );
+    if (!user) return undefined;
+    return { key: SHARED_ASSET_PRINCIPAL, learnerKey: `user:${user.id}` };
+  }
   return authenticatePersistenceCredentials(
     singleHeader(req.headers.authorization),
     singleHeader(req.headers['x-learner-key']),

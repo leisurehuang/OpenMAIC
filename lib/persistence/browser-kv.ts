@@ -1,0 +1,116 @@
+/**
+ * 浏览器端默认 KVStore 的选择。
+ *
+ * 未启用服务端持久化时，与上游一致：`BrowserKVStore`（纯 localStorage）。
+ * 启用服务端持久化（NEXT_PUBLIC_PERSISTENCE=1）时，account 作用域改走
+ * `HttpKVStore` → `/api/persistence/kv/...`，按登录用户（或部署的共享键）
+ * 分区，设置随账户跨浏览器同步；device 作用域永远留在本机 localStorage。
+ *
+ * 一次性迁移：切换到服务端 KV 之前，account 值都在本地 localStorage。
+ * 远端没有某个键而本地有（旧浏览器）时，首次读取会把本地值回填到服务
+ * 端并返回——谁先读到，谁的本地配置成为账户基线，用户无需手动重配。
+ * 回填失败不阻塞读取（本会话仍用本地值），下次读取再试。
+ */
+import {
+  BrowserKVStore,
+  HttpKVStore,
+  type KVScope,
+  type KVStore,
+} from '@openmaic/storage';
+
+import { createLogger } from '@/lib/logger';
+import { getPersistenceRequestHeaders, isBrowserPersistenceEnabled } from './bootstrap';
+
+const log = createLogger('BrowserKV');
+
+class AccountMigratingKVStore implements KVStore {
+  readonly isLocalKVStore = false as const;
+  readonly servesDeviceScopeLocally = true as const;
+
+  /** 遗留数据归属标记：本地 account 值属于哪个学习者分区。 */
+  static readonly MIGRATION_OWNER_KEY = '__openmaic:kv-migration-owner';
+  private migrationOwnerKnown = false;
+  private migrationOwnerMatches = false;
+
+  constructor(
+    private readonly http: HttpKVStore,
+    private readonly local: BrowserKVStore,
+  ) {}
+
+  private isDeviceScope(scope: KVScope | undefined): boolean {
+    return scope === 'device';
+  }
+
+  /**
+   * 本地遗留的 account 值是否属于当前登录身份。首个在此浏览器使用服务端
+   * KV 的身份认领遗留数据（标记写入本地）；后来者不匹配则跳过迁移，
+   * 避免把前一个账户的配置（含提供商密钥）带回填到新账户分区。
+   */
+  private async legacyOwnedByCurrentUser(): Promise<boolean> {
+    if (this.migrationOwnerKnown) return this.migrationOwnerMatches;
+    this.migrationOwnerKnown = true;
+    try {
+      const headers = await getPersistenceRequestHeaders();
+      const currentLearner = headers['x-learner-key'];
+      if (!currentLearner) return (this.migrationOwnerMatches = false);
+      const marker = await this.local.get<string>(AccountMigratingKVStore.MIGRATION_OWNER_KEY, 'account');
+      if (marker === null) {
+        await this.local.set(AccountMigratingKVStore.MIGRATION_OWNER_KEY, currentLearner, 'account');
+        return (this.migrationOwnerMatches = true);
+      }
+      this.migrationOwnerMatches = marker === currentLearner;
+    } catch {
+      this.migrationOwnerMatches = false;
+    }
+    return this.migrationOwnerMatches;
+  }
+
+  async get<T>(key: string, scope?: KVScope): Promise<T | null> {
+    if (this.isDeviceScope(scope)) return this.local.get<T>(key, 'device');
+    const remote = await this.http.get<T>(key);
+    if (remote !== null) return remote;
+    if (!(await this.legacyOwnedByCurrentUser())) return null;
+    const legacy = await this.local.get<T>(key, 'account');
+    if (legacy === null) return null;
+    try {
+      await this.http.set<T>(key, legacy);
+      log.info(`Migrated local account KV entry "${key}" to the server`);
+    } catch (error) {
+      // 回填失败不阻塞本次读取；键仍在本地，下次读取重试。
+      log.warn(`Could not migrate local account KV entry "${key}" to the server:`, error);
+    }
+    return legacy;
+  }
+
+  async set<T>(key: string, value: T, scope?: KVScope): Promise<void> {
+    if (this.isDeviceScope(scope)) return this.local.set<T>(key, value, 'device');
+    return this.http.set<T>(key, value);
+  }
+
+  async remove(key: string, scope?: KVScope): Promise<void> {
+    if (this.isDeviceScope(scope)) return this.local.remove(key, 'device');
+    await this.http.remove(key);
+    // 同步清掉本地遗留，避免删除的设置经迁移路径复活。
+    await this.local.remove(key, 'account').catch(() => {});
+  }
+
+  async keys(prefix = '', scope?: KVScope): Promise<string[]> {
+    if (this.isDeviceScope(scope)) return this.local.keys(prefix, 'device');
+    return this.http.keys(prefix);
+  }
+}
+
+export function createDefaultAppKVStore(): KVStore {
+  if (!isBrowserPersistenceEnabled()) {
+    return new BrowserKVStore();
+  }
+  const local = new BrowserKVStore();
+  const http = new HttpKVStore({
+    baseUrl: '/api/persistence',
+    deviceStore: local,
+    // 认证头与 runtime/document 相同：authorization 开发令牌 + x-learner-key
+    // （登录模式下服务端以会话为准，忽略客户端头中的身份）。
+    headers: () => getPersistenceRequestHeaders(),
+  });
+  return new AccountMigratingKVStore(http, local);
+}

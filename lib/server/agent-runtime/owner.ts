@@ -20,7 +20,9 @@ function readCookie(headers: Headers, name: string): string | undefined {
 }
 
 function anonymousCookieHeader(id: string): string {
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  // Match the access-code cookie: Secure is opt-in via COOKIE_SECURE so the
+  // identity survives on plain-HTTP self-hosted deployments.
+  const secure = process.env.COOKIE_SECURE === 'true' ? '; Secure' : '';
   return (
     `${ANONYMOUS_COOKIE}=${id}; Path=/; HttpOnly; SameSite=Lax; ` +
     `Max-Age=${ANONYMOUS_COOKIE_MAX_AGE_SECONDS}${secure}`
@@ -49,12 +51,32 @@ function anonymousCookieHeader(id: string): string {
  * call sites, or sessions created under authenticated identities would be
  * unreachable by their own owner.
  */
-export function resolveRequestOwnerId(
+export async function resolveRequestOwnerId(
   req: Pick<Request, 'headers'>,
   responseHeaders: Headers,
   authenticatedOwnerId?: string,
-): string {
+): Promise<string | undefined> {
   if (authenticatedOwnerId) return authenticatedOwnerId;
+
+  // Login auth is the hard gate: when enabled, a database-verified session is
+  // required for ANY owner resolution — including shared-library deployments,
+  // where the shared owner serves authenticated users only. No session →
+  // undefined, which callers translate into a 401.
+  const { isAuthRequired, resolveSessionUser } = await import('@/lib/server/auth');
+  if (isAuthRequired()) {
+    const user = await resolveSessionUser(req);
+    if (!user) return undefined;
+    const sharedId = process.env.OPENMAIC_SHARED_OWNER_ID;
+    if (sharedId && sharedId.trim()) return `shared:${sharedId.trim()}`;
+    return `user:${user.id}`;
+  }
+
+  // Single-library deployments without login auth: a trusted learning group
+  // wants every visitor to see one shared course library instead of
+  // per-browser anonymous partitions. When set, the cookie is never consulted
+  // and every request resolves to the same constant owner.
+  const sharedId = process.env.OPENMAIC_SHARED_OWNER_ID;
+  if (sharedId && sharedId.trim()) return `shared:${sharedId.trim()}`;
 
   const existingId = readCookie(req.headers, ANONYMOUS_COOKIE);
   if (existingId && UUID_V4.test(existingId)) return `anon:${existingId}`;

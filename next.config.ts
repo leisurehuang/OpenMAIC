@@ -7,6 +7,12 @@ const nextConfig: NextConfig = {
       'lib/server/agent-runtime/import-pptx-worker.mjs',
       'skills/openmaic/**',
       'skills/agent-runtime/**',
+      // instrumentation.ts raises the global undici fetch timeouts via a
+      // webpackIgnore'd dynamic import, which is invisible to the output file
+      // tracer — without this entry the standalone image ships without the
+      // npm undici package, the import fails silently, and GLM calls longer
+      // than the default 300s headersTimeout die as "Headers Timeout Error".
+      'node_modules/undici/**',
     ],
   },
   typescript: {

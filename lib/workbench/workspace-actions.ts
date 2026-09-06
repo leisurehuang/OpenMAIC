@@ -1,6 +1,7 @@
 'use server';
 
 import { cookies } from 'next/headers';
+import { SESSION_COOKIE } from '@/lib/server/auth';
 import { getAgentSessionStore } from '@/lib/server/agent-runtime/store';
 
 /**
@@ -15,6 +16,26 @@ const ANONYMOUS_COOKIE = 'anonymous_id';
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 async function currentOwnerId(): Promise<string> {
+  // Keep in sync with resolveRequestOwnerId: a shared-owner deployment must
+  // resolve the same constant here, or server actions would mutate a
+  // different partition than the routes that listed the data.
+  const sharedId = process.env.OPENMAIC_SHARED_OWNER_ID;
+
+  // Login auth: mirror resolveRequestOwnerId — verify the session before
+  // falling back to the anonymous cookie, so server actions respect the
+  // login wall. In shared deployments the shared library serves verified
+  // users; otherwise each user gets a personal partition.
+  const { isAuthRequired, resolveSessionUserFromCookieValue } = await import('@/lib/server/auth');
+  if (isAuthRequired()) {
+    const cookieStore = await cookies();
+    const user = await resolveSessionUserFromCookieValue(cookieStore.get(SESSION_COOKIE)?.value);
+    if (!user) throw new Error('UNAUTHENTICATED');
+    if (sharedId && sharedId.trim()) return `shared:${sharedId.trim()}`;
+    return `user:${user.id}`;
+  }
+
+  if (sharedId && sharedId.trim()) return `shared:${sharedId.trim()}`;
+
   const cookieStore = await cookies();
   const existing = cookieStore.get(ANONYMOUS_COOKIE)?.value;
   if (existing && UUID_V4.test(existing)) return `anon:${existing}`;
@@ -24,7 +45,7 @@ async function currentOwnerId(): Promise<string> {
     sameSite: 'lax',
     path: '/',
     maxAge: 30 * 24 * 60 * 60,
-    secure: process.env.NODE_ENV === 'production',
+    secure: process.env.COOKIE_SECURE === 'true',
   });
   return `anon:${minted}`;
 }
