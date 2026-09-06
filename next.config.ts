@@ -13,6 +13,14 @@ const nextConfig: NextConfig = {
       // npm undici package, the import fails silently, and GLM calls longer
       // than the default 300s headersTimeout die as "Headers Timeout Error".
       'node_modules/undici/**',
+      // sharp's .node binary is traced, but at runtime it dlopens
+      // libvips-cpp.so.<ver> from @img/sharp-libvips-<platform>/lib, which is
+      // invisible to the output file tracer (not a require). Under pnpm these
+      // packages live in node_modules/.pnpm/@img+...; without this entry the
+      // standalone image ships without the .so and sharp fails at boot with
+      // "ERR_DLOPEN_FAILED: libvips-cpp.so.8.18.6: No such file or directory",
+      // taking down the agent runtime started from instrumentation.ts.
+      'node_modules/.pnpm/@img+sharp-libvips-linuxmusl-*@*/node_modules/@img/sharp-libvips-linuxmusl-*/lib/**',
     ],
   },
   typescript: {

@@ -19,9 +19,25 @@ import {
 } from '@openmaic/storage';
 
 import { createLogger } from '@/lib/logger';
-import { getPersistenceRequestHeaders, isBrowserPersistenceEnabled } from './bootstrap';
+import {
+  getPersistenceRequestHeaders,
+  isBrowserPersistenceEnabled,
+  isLoginAuthSignedOut,
+} from './bootstrap';
 
 const log = createLogger('BrowserKV');
+
+/**
+ * 登录认证部署里当前是否未登录（登录页 / 登出后 / 会话已失效）。
+ *
+ * 未登录时服务端中间件对 /api/persistence 一律 401，那会被持久化层当成
+ * 存储故障上报成“更改未被保存”。此时 account 作用域留在本机
+ * localStorage：登录 / 注册成功后整页跳转，新页面重新探测认证状态回到
+ * 服务端，本地值经既有迁移路径回填。
+ */
+async function loginSignedOut(): Promise<boolean> {
+  return isLoginAuthSignedOut();
+}
 
 class AccountMigratingKVStore implements KVStore {
   readonly isLocalKVStore = false as const;
@@ -67,6 +83,7 @@ class AccountMigratingKVStore implements KVStore {
 
   async get<T>(key: string, scope?: KVScope): Promise<T | null> {
     if (this.isDeviceScope(scope)) return this.local.get<T>(key, 'device');
+    if (await loginSignedOut()) return this.local.get<T>(key, 'account');
     const remote = await this.http.get<T>(key);
     if (remote !== null) return remote;
     if (!(await this.legacyOwnedByCurrentUser())) return null;
@@ -84,11 +101,16 @@ class AccountMigratingKVStore implements KVStore {
 
   async set<T>(key: string, value: T, scope?: KVScope): Promise<void> {
     if (this.isDeviceScope(scope)) return this.local.set<T>(key, value, 'device');
+    if (await loginSignedOut()) return this.local.set<T>(key, value, 'account');
     return this.http.set<T>(key, value);
   }
 
   async remove(key: string, scope?: KVScope): Promise<void> {
     if (this.isDeviceScope(scope)) return this.local.remove(key, 'device');
+    if (await loginSignedOut()) {
+      await this.local.remove(key, 'account');
+      return;
+    }
     await this.http.remove(key);
     // 同步清掉本地遗留，避免删除的设置经迁移路径复活。
     await this.local.remove(key, 'account').catch(() => {});
@@ -96,6 +118,7 @@ class AccountMigratingKVStore implements KVStore {
 
   async keys(prefix = '', scope?: KVScope): Promise<string[]> {
     if (this.isDeviceScope(scope)) return this.local.keys(prefix, 'device');
+    if (await loginSignedOut()) return this.local.keys(prefix, 'account');
     return this.http.keys(prefix);
   }
 }

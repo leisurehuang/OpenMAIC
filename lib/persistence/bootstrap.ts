@@ -28,27 +28,55 @@ function sharedLearnerKeyOverride(): string | undefined {
 }
 
 /**
- * 登录认证模式（NEXT_PUBLIC_AUTH_REQUIRED 编译期开关）：学习者分区来自
- * 服务端验证的会话（/api/auth/me），设置跟随登录用户而非浏览器——
- * 同一账户在不同设备上看到同一套配置。优先级：登录用户 > 共享键 > 匿名设备键。
+ * 登录认证探测结果。
+ * - `'disabled'`：构建期未启用登录认证（开发令牌模式，无需探测）。
+ * - `'signed-out'`：登录认证开启，且 `/api/auth/me` 明确报告没有登录用户
+ *   （HTTP 200 且 `user` 为空）。这是服务端给出的确定性结论；区别于下面
+ *   的探测失败——网络故障或 5xx 不能算登出，否则一次抖动就会让客户端把
+ *   account 数据悄悄写到本机，等服务端恢复后又被服务端旧值遮蔽。
+ * - `'probe-failed'`：`/api/auth/me` 不可达或非 2xx。结论未知，保持原有
+ *   行为：请求服务端，失败如实上报。
+ * - 字符串：已登录用户的学习者分区键（`user:<id>`）。
  */
-function loginLearnerKey(): Promise<string | undefined> {
+export type LoginAuthProbe = 'disabled' | 'signed-out' | 'probe-failed' | (string & {});
+
+let loginAuthProbePromise: Promise<LoginAuthProbe> | undefined;
+
+function probeLoginAuth(): Promise<LoginAuthProbe> {
   const enabled = /^(1|true)$/i.test((process.env.NEXT_PUBLIC_AUTH_REQUIRED ?? '').trim());
-  if (!enabled) return Promise.resolve(undefined);
-  authLearnerKeyPromise ??= fetch('/api/auth/me', { credentials: 'include' })
+  if (!enabled) return Promise.resolve('disabled');
+  // 按页面缓存一次：登录 / 注册 / 登出都伴随整页跳转（页面级缓存不会跨
+  // 身份切换失效），而每次 KV 读写都重新探测会把 /api/auth/me 变成热点。
+  loginAuthProbePromise ??= fetch('/api/auth/me', { credentials: 'include' })
     .then(async (res) => {
-      if (!res.ok) return undefined;
+      if (!res.ok) return 'probe-failed' as const;
       const body = (await res.json().catch(() => null)) as
         | { user?: { id?: string; name?: string; learnerKey?: string } | null }
         | null;
       const learnerKey = body?.user?.learnerKey;
-      return typeof learnerKey === 'string' && learnerKey ? learnerKey : undefined;
+      return typeof learnerKey === 'string' && learnerKey ? learnerKey : ('signed-out' as const);
     })
-    .catch(() => undefined);
-  return authLearnerKeyPromise;
+    .catch(() => 'probe-failed' as const);
+  return loginAuthProbePromise;
 }
 
-let authLearnerKeyPromise: Promise<string | undefined> | undefined;
+/**
+ * 登录认证开启且服务端明确报告未登录（登录页 / 登出后 / 会话已失效）。
+ *
+ * 此时 account 作用域不应再请求服务端 KV：认证中间件对未登录请求一律
+ * 401，持久化层会把它当成存储故障，向用户弹出“更改未被保存”的告警。
+ * 消费方（browser-kv）据此把 account 读写留在本机 localStorage，登录后
+ * 整页跳转重新探测，再回到服务端并走既有迁移路径回填。
+ */
+export async function isLoginAuthSignedOut(): Promise<boolean> {
+  return (await probeLoginAuth()) === 'signed-out';
+}
+
+function loginLearnerKey(): Promise<string | undefined> {
+  return probeLoginAuth().then((probe) =>
+    probe === 'disabled' || probe === 'signed-out' || probe === 'probe-failed' ? undefined : probe,
+  );
+}
 
 export function getPersistenceLearnerKey(): Promise<string> {
   if (!isBrowserPersistenceEnabled()) {
