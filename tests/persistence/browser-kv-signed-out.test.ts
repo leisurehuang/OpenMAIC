@@ -63,9 +63,8 @@ describe('browser-kv account scope under login auth', () => {
     vi.resetModules();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
-    vi.stubEnv('NEXT_PUBLIC_PERSISTENCE', '1');
-    vi.stubEnv('NEXT_PUBLIC_PERSISTENCE_TOKEN', 'test-dev-token');
-    vi.stubGlobal('window', {});
+    // RootLayout SSR 注入的服务端配置标志：模拟配了 DATABASE_URL 的部署。
+    vi.stubGlobal('window', { __OPENMAIC_PERSISTENCE_CONFIGURED__: true });
     vi.stubGlobal('localStorage', memoryStorage());
   });
 
@@ -133,6 +132,10 @@ describe('browser-kv account scope under login auth', () => {
     expect(await kv.get<{ probe: string }>('settings-storage', 'account')).toEqual({
       probe: 'server',
     });
-    expect(log.persistenceCalls).toEqual(['GET /api/persistence/kv/entries/settings-storage']);
+    expect(log.persistenceCalls).toEqual([
+      // 运行时探测（页面级缓存一次）：确认服务端配了持久化。
+      'GET /api/persistence/kv/keys?prefix=__probe__',
+      'GET /api/persistence/kv/entries/settings-storage',
+    ]);
   });
 });

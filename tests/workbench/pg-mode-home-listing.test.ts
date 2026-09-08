@@ -3,7 +3,7 @@
 /**
  * PG mode home listing — the owner-scoped course list.
  *
- * With server persistence on (`NEXT_PUBLIC_PERSISTENCE=1`) the generic
+ * With the SSR-injected persistence flag on, the generic
  * `GET /api/persistence/documents` listing is refused server-side
  * (`403 FORBIDDEN_DOCUMENTS`) by the capability model: reads are by-id and
  * listings are owner-only. The home/workspace library must therefore list
@@ -123,7 +123,7 @@ function ownerListingsFetch() {
 describe('PG-mode home listing', () => {
   beforeEach(() => {
     discovery = null;
-    vi.stubEnv('NEXT_PUBLIC_PERSISTENCE', '1');
+    vi.stubGlobal('__OPENMAIC_PERSISTENCE_CONFIGURED__', true);
     vi.stubGlobal('fetch', vi.fn());
     mocks.toastError.mockClear();
     mocks.folders.mockResolvedValue([]);
@@ -199,7 +199,7 @@ describe('PG-mode home listing', () => {
   });
 
   it('keeps the local IndexedDB listing when server persistence is off', async () => {
-    vi.stubEnv('NEXT_PUBLIC_PERSISTENCE', '');
+    vi.stubGlobal('__OPENMAIC_PERSISTENCE_CONFIGURED__', false);
     mocks.listDocuments.mockResolvedValue([
       { id: 'local-1', name: 'Local course', sceneCount: 1, createdAt: 1, updatedAt: 2 },
     ]);

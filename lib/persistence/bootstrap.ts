@@ -12,8 +12,39 @@ import { getLearnerKey } from '@/lib/runtime/learner-key';
 let deviceKv: BrowserKVStore | undefined;
 let learnerKeyPromise: Promise<string> | undefined;
 
+declare global {
+  interface Window {
+    /** RootLayout SSR 注入：服务端是否配置了 DATABASE_URL。 */
+    __OPENMAIC_PERSISTENCE_CONFIGURED__?: boolean;
+  }
+}
+
 export function isBrowserPersistenceEnabled(): boolean {
-  return typeof window !== 'undefined' && process.env.NEXT_PUBLIC_PERSISTENCE === '1';
+  // 服务端持久化不再有构建期开关：RootLayout 每次渲染时把
+  // DATABASE_URL 的存在性内联注入 HTML，同步存储缝（runtime/document）
+  // 在模块加载期读它。标志缺失时保守视为未配置，留在本机。
+  return typeof window !== 'undefined' && window.__OPENMAIC_PERSISTENCE_CONFIGURED__ === true;
+}
+
+/**
+ * 服务端是否配置了持久化（DATABASE_URL）。登录是标准流程后不再有
+ * 构建期开关：浏览器运行时探测 /api/persistence —— 404
+ * PERSISTENCE_NOT_CONFIGURED 是唯一明确的“未配置”信号；401（未登录）、
+ * 2xx、甚至 5xx 都说明路由活着（配了库），让后续真实操作照常走服务端
+ * 路径并把故障如实上报，而不是靠探测静默回退本机。按页面缓存一次。
+ */
+let serverBackedPromise: Promise<boolean> | undefined;
+
+export function isAccountScopeServerBacked(): Promise<boolean> {
+  // SSR 注入的同步标志已明确“未配库”时短路，不发探测请求；仅当标志
+  // 为真时才用一次请求期探测兕底（防陈旧缓存/标志过期）。
+  if (!isBrowserPersistenceEnabled()) return Promise.resolve(false);
+  serverBackedPromise ??= fetch('/api/persistence/kv/keys?prefix=__probe__', {
+    credentials: 'include',
+  })
+    .then((res) => res.status !== 404)
+    .catch(() => true);
+  return serverBackedPromise;
 }
 
 /**
@@ -78,9 +109,6 @@ function loginLearnerKey(): Promise<string | undefined> {
 }
 
 export function getPersistenceLearnerKey(): Promise<string> {
-  if (!isBrowserPersistenceEnabled()) {
-    return Promise.reject(new Error('Browser persistence is not enabled'));
-  }
   if (learnerKeyPromise) return learnerKeyPromise;
   learnerKeyPromise = (async () => {
     const loginKey = await loginLearnerKey();

@@ -3,7 +3,7 @@
 /**
  * PG-mode folder data flow — the create/list seam the workspace rail depends on.
  *
- * With server persistence on (`NEXT_PUBLIC_PERSISTENCE=1`) the workspace rail
+ * With the SSR-injected persistence flag on, the workspace rail
  * creates folders through `POST /api/folders` (and renames/deletes through the
  * `/api/folders/:id` family), so the list the sidebar renders must read the
  * same owner-scoped server store. This suite pins that contract at the storage
@@ -149,7 +149,7 @@ function Harness({ onDiscovery }: { onDiscovery: (value: HomeDiscovery) => void 
 describe('PG-mode folder listing and creation', () => {
   beforeEach(() => {
     discovery = null;
-    vi.stubEnv('NEXT_PUBLIC_PERSISTENCE', '1');
+    vi.stubGlobal('__OPENMAIC_PERSISTENCE_CONFIGURED__', true);
     vi.stubGlobal('fetch', vi.fn());
     mocks.listDocuments.mockClear();
     mocks.listLegacyStages.mockClear();
@@ -273,7 +273,7 @@ describe('PG-mode folder listing and creation', () => {
   });
 
   it('keeps the device-local Dexie listing when server persistence is off', async () => {
-    vi.stubEnv('NEXT_PUBLIC_PERSISTENCE', '');
+    vi.stubGlobal('__OPENMAIC_PERSISTENCE_CONFIGURED__', false);
     mocks.folders.mockResolvedValue([
       { id: 'local-1', name: 'Local', order: 0, createdAt: 1, updatedAt: 2 },
     ]);

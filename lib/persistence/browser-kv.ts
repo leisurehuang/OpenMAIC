@@ -1,10 +1,11 @@
 /**
  * 浏览器端默认 KVStore 的选择。
  *
- * 未启用服务端持久化时，与上游一致：`BrowserKVStore`（纯 localStorage）。
- * 启用服务端持久化（NEXT_PUBLIC_PERSISTENCE=1）时，account 作用域改走
- * `HttpKVStore` → `/api/persistence/kv/...`，按登录用户（或部署的共享键）
- * 分区，设置随账户跨浏览器同步；device 作用域永远留在本机 localStorage。
+ * 服务端持久化由运行时探测决定（不再有构建期开关）：探测 /api/persistence
+ * 返回 404（未配 DATABASE_URL）时，与上游一致：纯 localStorage。服务端
+ * 可用时，account 作用域改走 `HttpKVStore` → `/api/persistence/kv/...`，
+ * 按登录用户（或部署的共享键）分区，设置随账户跨浏览器同步；device
+ * 作用域永远留在本机 localStorage。
  *
  * 一次性迁移：切换到服务端 KV 之前，account 值都在本地 localStorage。
  * 远端没有某个键而本地有（旧浏览器）时，首次读取会把本地值回填到服务
@@ -21,6 +22,7 @@ import {
 import { createLogger } from '@/lib/logger';
 import {
   getPersistenceRequestHeaders,
+  isAccountScopeServerBacked,
   isBrowserPersistenceEnabled,
   isLoginAuthSignedOut,
 } from './bootstrap';
@@ -35,9 +37,6 @@ const log = createLogger('BrowserKV');
  * localStorage：登录 / 注册成功后整页跳转，新页面重新探测认证状态回到
  * 服务端，本地值经既有迁移路径回填。
  */
-async function loginSignedOut(): Promise<boolean> {
-  return isLoginAuthSignedOut();
-}
 
 class AccountMigratingKVStore implements KVStore {
   readonly isLocalKVStore = false as const;
@@ -83,7 +82,7 @@ class AccountMigratingKVStore implements KVStore {
 
   async get<T>(key: string, scope?: KVScope): Promise<T | null> {
     if (this.isDeviceScope(scope)) return this.local.get<T>(key, 'device');
-    if (await loginSignedOut()) return this.local.get<T>(key, 'account');
+    if (await accountScopeStaysLocal()) return this.local.get<T>(key, 'account');
     const remote = await this.http.get<T>(key);
     if (remote !== null) return remote;
     if (!(await this.legacyOwnedByCurrentUser())) return null;
@@ -101,13 +100,13 @@ class AccountMigratingKVStore implements KVStore {
 
   async set<T>(key: string, value: T, scope?: KVScope): Promise<void> {
     if (this.isDeviceScope(scope)) return this.local.set<T>(key, value, 'device');
-    if (await loginSignedOut()) return this.local.set<T>(key, value, 'account');
+    if (await accountScopeStaysLocal()) return this.local.set<T>(key, value, 'account');
     return this.http.set<T>(key, value);
   }
 
   async remove(key: string, scope?: KVScope): Promise<void> {
     if (this.isDeviceScope(scope)) return this.local.remove(key, 'device');
-    if (await loginSignedOut()) {
+    if (await accountScopeStaysLocal()) {
       await this.local.remove(key, 'account');
       return;
     }
@@ -118,15 +117,23 @@ class AccountMigratingKVStore implements KVStore {
 
   async keys(prefix = '', scope?: KVScope): Promise<string[]> {
     if (this.isDeviceScope(scope)) return this.local.keys(prefix, 'device');
-    if (await loginSignedOut()) return this.local.keys(prefix, 'account');
+    if (await accountScopeStaysLocal()) return this.local.keys(prefix, 'account');
     return this.http.keys(prefix);
   }
 }
 
+/**
+ * account 作用域本次会话留在本机：未登录（服务端会 401，避免误报存储
+ * 故障），或运行时探测到服务端未配置持久化（无 DATABASE_URL）。
+ * 两个结论都按页面缓存，探测结果不随单次请求抖动翻转。
+ */
+async function accountScopeStaysLocal(): Promise<boolean> {
+  // 同步标志明确未配置时短路：未配库的部署零网络请求，留在本机。
+  if (!isBrowserPersistenceEnabled()) return true;
+  return (await isLoginAuthSignedOut()) || !(await isAccountScopeServerBacked());
+}
+
 export function createDefaultAppKVStore(): KVStore {
-  if (!isBrowserPersistenceEnabled()) {
-    return new BrowserKVStore();
-  }
   const local = new BrowserKVStore();
   const http = new HttpKVStore({
     baseUrl: '/api/persistence',

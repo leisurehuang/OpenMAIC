@@ -41,11 +41,7 @@ export interface LegacyWhiteboardImporterDeps {
 
 /** @internal Sealed configuration-derived provenance predicate. */
 export function isLegacyWhiteboardAutoImportEligible(): boolean {
-  return (
-    process.env.NEXT_PUBLIC_PERSISTENCE !== '1' &&
-    !isDocumentStorageConfigured() &&
-    !isRuntimeStorageConfigured()
-  );
+  return !isDocumentStorageConfigured() && !isRuntimeStorageConfigured();
 }
 
 function createLegacyWhiteboardImporter(deps: LegacyWhiteboardImporterDeps) {

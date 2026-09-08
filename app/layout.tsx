@@ -44,6 +44,17 @@ export default function RootLayout({
         className={`${GeistSans.variable} ${GeistMono.variable} antialiased`}
         suppressHydrationWarning
       >
+        {/* Runs before any client bundle: the synchronous runtime/document
+          storage seams read this flag at module load, so server-backed
+          persistence follows the runtime DATABASE_URL with no build-time
+          NEXT_PUBLIC_PERSISTENCE switch to keep in sync. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.__OPENMAIC_PERSISTENCE_CONFIGURED__=${JSON.stringify(
+              Boolean(process.env.DATABASE_URL),
+            )};`,
+          }}
+        />
         <ThemeProvider>
           <I18nProvider>
             <ServerProvidersInit />

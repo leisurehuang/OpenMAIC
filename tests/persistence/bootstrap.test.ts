@@ -22,8 +22,6 @@ describe('persistence client bootstrap', () => {
   });
 
   it('leaves all sealed storage seams untouched when the flag is unset', async () => {
-    vi.stubEnv('NEXT_PUBLIC_PERSISTENCE', '');
-
     const runtime = await import('@/lib/runtime/store');
     const documents = await import('@/lib/document-store');
     const assets = await import('@/lib/media/asset-pool-config');
@@ -34,9 +32,8 @@ describe('persistence client bootstrap', () => {
   });
 
   it('configures runtime and document HTTP stores without wiring the asset pool', async () => {
-    vi.stubEnv('NEXT_PUBLIC_PERSISTENCE', '1');
     vi.stubEnv('NEXT_PUBLIC_PERSISTENCE_TOKEN', 'test-dev-token');
-    vi.stubGlobal('window', {});
+    vi.stubGlobal('window', { __OPENMAIC_PERSISTENCE_CONFIGURED__: true });
     vi.stubGlobal('localStorage', memoryStorage());
 
     const { HttpDocumentStore } = await import('@openmaic/storage');
@@ -79,8 +76,7 @@ describe('persistence client bootstrap', () => {
   });
 
   it('does not run client configuration during server module evaluation', async () => {
-    vi.stubEnv('NEXT_PUBLIC_PERSISTENCE', '1');
-
+    // SSR/Node 求值期没有 window：即使服务端配了库，同步标志也读不到。
     const runtime = await import('@/lib/runtime/store');
     const documents = await import('@/lib/document-store');
     const assets = await import('@/lib/media/asset-pool-config');
@@ -91,8 +87,7 @@ describe('persistence client bootstrap', () => {
   });
 
   it('preflights both configured seams so a failure cannot partially configure bootstrap', async () => {
-    vi.stubEnv('NEXT_PUBLIC_PERSISTENCE', '1');
-    vi.stubGlobal('window', {});
+    vi.stubGlobal('window', { __OPENMAIC_PERSISTENCE_CONFIGURED__: true });
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const documents = await import('@/lib/document-store/config');
     documents.configureDocumentStorage({});
