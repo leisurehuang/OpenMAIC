@@ -9,52 +9,56 @@ afterEach(() => {
 });
 
 describe('resolveRequestOwnerId', () => {
-  it('mints a UUID-backed anonymous owner when the cookie is absent', () => {
+  it('mints a UUID-backed anonymous owner when the cookie is absent', async () => {
     const responseHeaders = new Headers();
 
-    const ownerId = resolveRequestOwnerId(new Request('http://localhost/agent'), responseHeaders);
+    const ownerId = await resolveRequestOwnerId(
+      new Request('http://localhost/agent'),
+      responseHeaders,
+    );
 
-    expect(ownerId.startsWith('anon:')).toBe(true);
-    expect(ownerId.slice('anon:'.length)).toMatch(UUID_V4);
+    expect(ownerId).toBeDefined();
+    expect(ownerId!.startsWith('anon:')).toBe(true);
+    expect(ownerId!.slice('anon:'.length)).toMatch(UUID_V4);
     expect(responseHeaders.get('set-cookie')).toContain(
-      `anonymous_id=${ownerId.slice('anon:'.length)}`,
+      `anonymous_id=${ownerId!.slice('anon:'.length)}`,
     );
   });
 
-  it('reuses a valid anonymous cookie without returning another cookie header', () => {
+  it('reuses a valid anonymous cookie without returning another cookie header', async () => {
     const id = 'a652e716-0e2e-47f5-8432-4ee60f6f0977';
     const responseHeaders = new Headers();
     const request = new Request('http://localhost/agent', {
       headers: { cookie: `theme=dark; anonymous_id=${id}; locale=en` },
     });
 
-    expect(resolveRequestOwnerId(request, responseHeaders)).toBe(`anon:${id}`);
+    expect(await resolveRequestOwnerId(request, responseHeaders)).toBe(`anon:${id}`);
     expect(responseHeaders.has('set-cookie')).toBe(false);
   });
 
-  it('sets a long-lived, HTTP-only, SameSite=Lax cookie at the root path', () => {
+  it('sets a long-lived, HTTP-only, SameSite=Lax cookie at the root path', async () => {
     const responseHeaders = new Headers();
 
-    resolveRequestOwnerId(new Request('http://localhost/agent'), responseHeaders);
+    await resolveRequestOwnerId(new Request('http://localhost/agent'), responseHeaders);
 
     expect(responseHeaders.get('set-cookie')).toMatch(
       /^anonymous_id=[0-9a-f-]+; Path=\/; HttpOnly; SameSite=Lax; Max-Age=2592000$/i,
     );
   });
 
-  it('adds Secure to the cookie in production', () => {
-    vi.stubEnv('NODE_ENV', 'production');
+  it('adds Secure to the cookie when COOKIE_SECURE is opted in', async () => {
+    vi.stubEnv('COOKIE_SECURE', 'true');
     const responseHeaders = new Headers();
 
-    resolveRequestOwnerId(new Request('https://example.test/agent'), responseHeaders);
+    await resolveRequestOwnerId(new Request('https://example.test/agent'), responseHeaders);
 
     expect(responseHeaders.get('set-cookie')).toMatch(/; Secure$/);
   });
 
-  it('uses an explicit authenticated owner without minting an anonymous cookie', () => {
+  it('uses an explicit authenticated owner without minting an anonymous cookie', async () => {
     const responseHeaders = new Headers();
 
-    const ownerId = resolveRequestOwnerId(
+    const ownerId = await resolveRequestOwnerId(
       new Request('http://localhost/agent'),
       responseHeaders,
       'user-42',
@@ -64,13 +68,13 @@ describe('resolveRequestOwnerId', () => {
     expect(responseHeaders.has('set-cookie')).toBe(false);
   });
 
-  it('prefers an authenticated owner over an existing anonymous cookie', () => {
+  it('prefers an authenticated owner over an existing anonymous cookie', async () => {
     const responseHeaders = new Headers();
     const request = new Request('http://localhost/agent', {
       headers: { cookie: 'anonymous_id=a652e716-0e2e-47f5-8432-4ee60f6f0977' },
     });
 
-    expect(resolveRequestOwnerId(request, responseHeaders, 'user-42')).toBe('user-42');
+    expect(await resolveRequestOwnerId(request, responseHeaders, 'user-42')).toBe('user-42');
     expect(responseHeaders.has('set-cookie')).toBe(false);
   });
 });

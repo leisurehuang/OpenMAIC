@@ -260,16 +260,16 @@ describe('PG-mode folder listing and creation', () => {
     await renameFolder('folder/one', 'Reading');
     await deleteFolder('folder/one', 'ungroup');
 
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      '/api/folders/folder%2Fone',
-      expect.objectContaining({ method: 'PATCH' }),
+    // The owner-identity warm-up may issue a settings-storage GET before the
+    // folder calls; assert the folder route sequence itself, ignoring any
+    // leading non-folder fetches.
+    const folderCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).startsWith('/api/folders/'),
     );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      '/api/folders/folder%2Fone?mode=ungroup',
-      expect.objectContaining({ method: 'DELETE' }),
-    );
+    expect(folderCalls).toEqual([
+      ['/api/folders/folder%2Fone', expect.objectContaining({ method: 'PATCH' })],
+      ['/api/folders/folder%2Fone?mode=ungroup', expect.objectContaining({ method: 'DELETE' })],
+    ]);
   });
 
   it('keeps the device-local Dexie listing when server persistence is off', async () => {

@@ -368,6 +368,7 @@ export async function callLLM<T extends GenerateTextParams>(
           usage: totalUsage,
           totalUsage,
           finishReason,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- stream shim must satisfy the generateText result shape
         } as unknown as GenerateTextResult<any, any>;
       });
 
