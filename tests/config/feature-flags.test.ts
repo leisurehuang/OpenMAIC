@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   isAgentRuntimeConfigured,
   isAgentRuntimeEnabled,
+  isPersistenceConfigured,
   isEditorRendererEnabled,
   isMaicEditorEnabled,
   isPlaybackRendererEnabled,
@@ -53,6 +54,25 @@ describe('agent runtime configuration predicate', () => {
       expect(isAgentRuntimeConfigured()).toBe(configured);
     },
   );
+});
+
+describe('isPersistenceConfigured', () => {
+  const previous = process.env.DATABASE_URL;
+
+  afterEach(() => {
+    if (previous === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previous;
+  });
+
+  it.each([
+    ['unset', undefined, false],
+    ['blank', '   ', false],
+    ['set', 'postgres://x', true],
+  ])('is %s → %s', (_case, databaseUrl, configured) => {
+    if (databaseUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = databaseUrl;
+    expect(isPersistenceConfigured()).toBe(configured);
+  });
 });
 
 describe('isMaicEditorEnabled', () => {

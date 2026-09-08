@@ -13,7 +13,7 @@
  */
 import type { NextRequest } from 'next/server';
 
-import { isAgentRuntimeConfigured } from '@/lib/config/feature-flags';
+import { isPersistenceConfigured } from '@/lib/config/feature-flags';
 import { apiError } from '@/lib/server/api-response';
 import {
   getSessionMaterial,
@@ -28,7 +28,7 @@ export const runtime = 'nodejs';
 type Params = { params: Promise<{ id: string }> };
 
 export async function GET(req: NextRequest, { params }: Params) {
-  if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
+  if (!isPersistenceConfigured()) return new Response('Not found', { status: 404 });
 
   const sessionId = new URL(req.url).searchParams.get('sessionId')?.trim();
   if (!sessionId) return apiError('MISSING_REQUIRED_FIELD', 400, 'sessionId is required');

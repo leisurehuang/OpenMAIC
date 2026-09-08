@@ -16,7 +16,7 @@ import { NextResponse } from 'next/server';
 
 import type { DocumentFolder, DocumentFolderStore } from '@openmaic/storage';
 
-import { isAgentRuntimeConfigured } from '@/lib/config/feature-flags';
+import { isPersistenceConfigured } from '@/lib/config/feature-flags';
 import { getOwnerScopedDocumentStore } from '@/lib/server/agent-runtime/owner-scoped-documents';
 import { ownerJson } from '@/lib/server/agent-runtime/route-response';
 import { withRequestOwnerId } from '@/lib/server/agent-runtime/with-owner';
@@ -38,7 +38,7 @@ function jsonError(status: number, code: string, message: string, headers?: Head
 
 // PATCH /api/folders/[id] — rename { name }.
 export async function PATCH(req: NextRequest, { params }: Params) {
-  if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
+  if (!isPersistenceConfigured()) return new Response('Not found', { status: 404 });
 
   let body: unknown;
   try {
@@ -99,7 +99,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
 // DELETE /api/folders/[id]?mode=ungroup|remove
 export async function DELETE(req: NextRequest, { params }: Params) {
-  if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
+  if (!isPersistenceConfigured()) return new Response('Not found', { status: 404 });
 
   const modeParam = req.nextUrl.searchParams.get('mode');
   const mode: 'ungroup' | 'remove' = modeParam === 'remove' ? 'remove' : 'ungroup';

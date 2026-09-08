@@ -25,6 +25,17 @@ export function isAgentRuntimeConfigured(): boolean {
 }
 
 /**
+ * Owner-scoped document data plane (stages/folders/materials/stage-meta):
+ * these routes only query the database — no runner involvement — so they
+ * follow DATABASE_URL exactly like the persistence routes. The browser
+ * picks the server-backed listing as soon as that flag is on, so gating on
+ * the agent-runtime switch would 404 a configured database deployment.
+ */
+export function isPersistenceConfigured(): boolean {
+  return Boolean(process.env.DATABASE_URL?.trim());
+}
+
+/**
  * Build-time workbench affordance. This public flag is separate from the
  * server runtime gate because Next.js inlines NEXT_PUBLIC values into client
  * bundles; both gates must be on before a workbench page is reachable.

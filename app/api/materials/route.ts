@@ -39,7 +39,7 @@ import { NextResponse } from 'next/server';
 import { createMaterialId } from '@openmaic/storage';
 import type { ConnectableQueryable } from '@openmaic/storage/server/reference';
 
-import { isAgentRuntimeConfigured } from '@/lib/config/feature-flags';
+import { isPersistenceConfigured } from '@/lib/config/feature-flags';
 import { apiError } from '@/lib/server/api-response';
 import { agentRuntimeConfig } from '@/lib/server/agent-runtime/config';
 import { ownerJson, ownerNotFound } from '@/lib/server/agent-runtime/route-response';
@@ -108,7 +108,7 @@ function parseLimit(raw: string | null): { limit?: number } | { invalid: true } 
 // GET /api/materials?sessionId=&limit=&before= — list one owned session's
 // materials, newest first, keyset-paged (the agent-tools list surface).
 export async function GET(req: NextRequest) {
-  if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
+  if (!isPersistenceConfigured()) return new Response('Not found', { status: 404 });
 
   const url = new URL(req.url);
   const sessionId = url.searchParams.get('sessionId')?.trim();
@@ -168,7 +168,7 @@ export async function POST(req: NextRequest) {
     return response;
   };
 
-  if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
+  if (!isPersistenceConfigured()) return new Response('Not found', { status: 404 });
 
   return withRequestOwnerId(req, async (ownerId, responseHeaders) => {
     try {

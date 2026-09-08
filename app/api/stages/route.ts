@@ -8,15 +8,16 @@
  * binds for the stage tools. A stage created here is visible to this browser
  * and to nobody else.
  *
- * The configured runtime gates the whole family: these routes serve the
- * workbench, which is agent-runtime territory, so a runtime that is off OR
- * enabled without a DATABASE_URL answers the same plain 404 as the agent
- * control-plane routes — never a 500 from a store that cannot connect.
+ * Gating: these routes are the owner data plane, not runner control —
+ * they follow DATABASE_URL (isPersistenceConfigured), exactly like the
+ * persistence routes, so a database-configured deployment always serves
+ * them; a runtime enabled without a DATABASE_URL still answers the same
+ * plain 404 — never a 500 from a store that cannot connect.
  */
 import type { NextRequest } from 'next/server';
 import { randomBytes } from 'node:crypto';
 
-import { isAgentRuntimeConfigured } from '@/lib/config/feature-flags';
+import { isPersistenceConfigured } from '@/lib/config/feature-flags';
 import type { AppDocumentOutline } from '@/lib/document-store/persistence-types';
 import { apiError } from '@/lib/server/api-response';
 import { getOwnerScopedDocumentStore } from '@/lib/server/agent-runtime/owner-scoped-documents';
@@ -33,7 +34,7 @@ function createStageId(): string {
 
 // GET /api/stages — list every stage document owned by the caller.
 export async function GET(req: NextRequest) {
-  if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
+  if (!isPersistenceConfigured()) return new Response('Not found', { status: 404 });
 
   return withRequestOwnerId(req, async (ownerId, responseHeaders) => {
     const store = await getOwnerScopedDocumentStore(ownerId);
@@ -48,7 +49,7 @@ export async function GET(req: NextRequest) {
 // a malformed body must not mint an anonymous cookie partition for a request
 // that will not proceed.
 export async function POST(req: NextRequest) {
-  if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
+  if (!isPersistenceConfigured()) return new Response('Not found', { status: 404 });
 
   let body: unknown;
   try {
