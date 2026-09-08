@@ -3,15 +3,22 @@ import type { RequestListener } from 'node:http';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // 注册登录是标准流程（isAuthRequired 恒 true）；本套件钉住的是 dev-token
-// 匿名方案的行为，mock 关闭登录开关保住该分支的覆盖。
+// 匿名方案的行为，mock 关闭登录开关保住该分支的覆盖；个别用例通过
+// mocks.authRequired 切回登录语义。
+const mocks = vi.hoisted(() => ({
+  authRequired: false,
+  sessionUser: undefined as { id: string } | undefined,
+}));
 vi.mock('@/lib/server/auth', () => ({
-  isAuthRequired: () => false,
-  resolveSessionUserFromCookieValue: async () => undefined,
-  resolveSessionUser: async () => undefined,
+  isAuthRequired: () => mocks.authRequired,
+  resolveSessionUserFromCookieValue: async () => mocks.sessionUser,
+  resolveSessionUser: async () => mocks.sessionUser,
 }));
 
 describe('embedded persistence route', () => {
   beforeEach(() => {
+    mocks.authRequired = false;
+    mocks.sessionUser = undefined;
     vi.resetModules();
     vi.unstubAllEnvs();
     vi.stubEnv('ASSET_S3_BUCKET', '');
@@ -44,19 +51,18 @@ describe('embedded persistence route', () => {
     });
   });
 
-  it('refuses configured persistence when the development token is missing', async () => {
+  it('refuses unauthenticated requests now that login is the standard flow', async () => {
+    mocks.authRequired = true;
     vi.stubEnv('DATABASE_URL', 'postgres://unused-in-this-test');
-    vi.stubEnv('PERSISTENCE_DEV_TOKEN', '');
     const { GET } = await import('@/app/api/persistence/[...path]/route');
 
-    const response = await GET(new Request('http://localhost/api/persistence/documents'));
+    const response = await GET(new Request('http://localhost/api/persistence/kv/keys'));
 
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({
-      error: {
-        code: 'PERSISTENCE_DEV_TOKEN_MISSING',
-        message: 'server persistence requires PERSISTENCE_DEV_TOKEN (development auth only)',
-      },
+      success: false,
+      errorCode: 'UNAUTHENTICATED',
+      error: 'Authentication required',
     });
   });
 
