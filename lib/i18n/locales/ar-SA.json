@@ -231,7 +231,19 @@
     "exitFullscreen": "الخروج من ملء الشاشة",
     "editCourse": "تحرير الدورة",
     "doneEditing": "إنهاء التحرير",
-    "proModeDisabledHint": "التحرير غير متاح في هذه الصفحة — افتح شريحة من الدورة للتحرير باستخدام وضع Pro."
+    "proModeDisabledHint": "التحرير غير متاح في هذه الصفحة — افتح شريحة من الدورة للتحرير باستخدام وضع Pro.",
+    "generationProgress": {
+      "title": "جارٍ إنشاء محتوى الدرس",
+      "stepContent": "كتابة المحتوى",
+      "stepActions": "تنسيق الإجراءات",
+      "stepTts": "توليد التعليق الصوتي",
+      "pageProgress": "الصفحة {{page}} من {{total}}",
+      "completedCount": "اكتملت {{count}} صفحات",
+      "remainingCount": "متبقٍ {{count}} صفحات",
+      "mediaGenerating": "جارٍ إنشاء {{count}} وسائط",
+      "mediaDone": "اكتمل {{count}} وسائط",
+      "reassurance": "هذه الصفحة غنية بالمحتوى — لا يزال الذكاء الاصطناعي يعمل، يرجى الانتظار…"
+    }
   },
   "edit": {
     "proMode": "احترافي",

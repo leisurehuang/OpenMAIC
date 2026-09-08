@@ -231,7 +231,19 @@
     "exitFullscreen": "Vollbild beenden",
     "editCourse": "Kurs bearbeiten",
     "doneEditing": "Bearbeitung abschließen",
-    "proModeDisabledHint": "Diese Seite kann nicht bearbeitet werden — öffne eine Kursfolie, um sie im Pro-Modus zu bearbeiten."
+    "proModeDisabledHint": "Diese Seite kann nicht bearbeitet werden — öffne eine Kursfolie, um sie im Pro-Modus zu bearbeiten.",
+    "generationProgress": {
+      "title": "Kursinhalte werden erstellt",
+      "stepContent": "Inhalte verfassen",
+      "stepActions": "Aktionen planen",
+      "stepTts": "Sprachausgabe erstellen",
+      "pageProgress": "Seite {{page}} von {{total}}",
+      "completedCount": "{{count}} Seiten fertig",
+      "remainingCount": "{{count}} Seiten verbleibend",
+      "mediaGenerating": "{{count}} Medien in Bearbeitung",
+      "mediaDone": "{{count}} Medien fertig",
+      "reassurance": "Diese Seite ist inhaltlich umfangreich – die KI arbeitet noch, bitte warten …"
+    }
   },
   "edit": {
     "proMode": "Pro",

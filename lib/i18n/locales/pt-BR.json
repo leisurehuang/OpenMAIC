@@ -644,7 +644,19 @@
     "exitFullscreen": "Sair da tela cheia",
     "editCourse": "Editar curso",
     "doneEditing": "Concluir edição",
-    "proModeDisabledHint": "A edição não está disponível nesta página — abra um slide do curso para editar no modo Pro."
+    "proModeDisabledHint": "A edição não está disponível nesta página — abra um slide do curso para editar no modo Pro.",
+    "generationProgress": {
+      "title": "Gerando conteúdo do curso",
+      "stepContent": "Escrevendo conteúdo",
+      "stepActions": "Orquestrando ações",
+      "stepTts": "Sintetizando narração",
+      "pageProgress": "Página {{page}} de {{total}}",
+      "completedCount": "{{count}} páginas concluídas",
+      "remainingCount": "{{count}} páginas restantes",
+      "mediaGenerating": "{{count}} mídias gerando",
+      "mediaDone": "{{count}} mídias concluídas",
+      "reassurance": "Esta página tem muito conteúdo — a IA ainda está trabalhando, aguarde um momento…"
+    }
   },
   "classroomComplete": {
     "title": "Curso concluído",

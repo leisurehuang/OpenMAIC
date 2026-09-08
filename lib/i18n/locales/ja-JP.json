@@ -231,7 +231,19 @@
     "exitFullscreen": "全画面表示を終了",
     "editCourse": "コースを編集",
     "doneEditing": "編集を完了",
-    "proModeDisabledHint": "このページでは編集できません。コースのスライドを開くと Pro モードで編集できます。"
+    "proModeDisabledHint": "このページでは編集できません。コースのスライドを開くと Pro モードで編集できます。",
+    "generationProgress": {
+      "title": "コースコンテンツを生成中",
+      "stepContent": "コンテンツ作成",
+      "stepActions": "アクション構成",
+      "stepTts": "ナレーション合成",
+      "pageProgress": "第 {{page}} / {{total}} ページ",
+      "completedCount": "完了 {{count}} ページ",
+      "remainingCount": "残り {{count}} ページ",
+      "mediaGenerating": "メディア生成中 {{count}} 件",
+      "mediaDone": "メディア完了 {{count}} 件",
+      "reassurance": "このページは内容が多いため、AI が生成中です。しばらくお待ちください…"
+    }
   },
   "edit": {
     "proMode": "プロモード",

@@ -231,7 +231,19 @@
     "exitFullscreen": "Exit Fullscreen",
     "editCourse": "Edit course",
     "doneEditing": "Done editing",
-    "proModeDisabledHint": "Editing isn't available on this page — open a course slide to edit with Pro mode."
+    "proModeDisabledHint": "Editing isn't available on this page — open a course slide to edit with Pro mode.",
+    "generationProgress": {
+      "title": "Generating course content",
+      "stepContent": "Writing content",
+      "stepActions": "Arranging actions",
+      "stepTts": "Synthesizing voiceover",
+      "pageProgress": "Page {{page}} of {{total}}",
+      "completedCount": "{{count}} pages done",
+      "remainingCount": "{{count}} pages remaining",
+      "mediaGenerating": "{{count}} media generating",
+      "mediaDone": "{{count}} media done",
+      "reassurance": "This page is content-rich — the AI is still working, please hold on…"
+    }
   },
   "edit": {
     "proMode": "Pro",

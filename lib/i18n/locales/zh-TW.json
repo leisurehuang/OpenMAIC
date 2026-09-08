@@ -231,7 +231,19 @@
     "exitFullscreen": "離開全螢幕",
     "editCourse": "編輯課程",
     "doneEditing": "完成編輯",
-    "proModeDisabledHint": "此頁面無法編輯——開啟課程投影片以使用 Pro 模式編輯。"
+    "proModeDisabledHint": "此頁面無法編輯——開啟課程投影片以使用 Pro 模式編輯。",
+    "generationProgress": {
+      "title": "正在生成課程內容",
+      "stepContent": "撰寫內容",
+      "stepActions": "編排動作",
+      "stepTts": "合成配音",
+      "pageProgress": "第 {{page}} / {{total}} 頁",
+      "completedCount": "已完成 {{count}} 頁",
+      "remainingCount": "剩餘 {{count}} 頁",
+      "mediaGenerating": "素材生成中 {{count}} 項",
+      "mediaDone": "素材已完成 {{count}} 項",
+      "reassurance": "本頁內容較多，AI 仍在努力生成，請耐心等待…"
+    }
   },
   "edit": {
     "proMode": "專業模式",

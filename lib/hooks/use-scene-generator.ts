@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useRef } from 'react';
-import { useStageStore } from '@/lib/store/stage';
+import { useStageStore, type GenerationPhase } from '@/lib/store/stage';
 import { isSceneEditLocked } from '@/lib/edit/regen-lock';
 import { getCurrentModelConfig } from '@/lib/utils/model-config';
 import { useSettingsStore } from '@/lib/store/settings';
@@ -640,6 +640,12 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
       fetchAbortRef.current = new AbortController();
       const signal = fetchAbortRef.current.signal;
 
+      // Pipeline phase for the generation progress panel. Written at the SERIAL
+      // consumption points below (never at the parallel pre-warm kickoff) so the
+      // panel always reflects the outline the user is actually waiting on.
+      const setPhase = (phase: GenerationPhase) =>
+        store.getState().setCurrentGeneratingPhase(phase);
+
       const state = store.getState();
       const { outlines, scenes, stage } = state;
       const startEpoch = state.generationEpoch;
@@ -660,6 +666,7 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
         store.getState().setGenerationStatus('completed');
         store.getState().setGeneratingOutlines([]);
         store.getState().setGenerationComplete(true);
+        setPhase('idle');
         options.onComplete?.();
         generatingRef.current = false;
         return;
@@ -758,6 +765,8 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
           }
 
           store.getState().setCurrentGeneratingOrder(outline.order);
+          store.getState().setCurrentGeneratingStartedAt(Date.now());
+          setPhase('content');
 
           // Step 1: content — await this outline's pre-warmed fetch (parallel),
           // which usually resolved while the previous scene's actions/TTS ran; or
@@ -800,6 +809,7 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
           }
 
           // Step 2: Generate actions + assemble scene
+          setPhase('actions');
           options.onPhaseChange?.('actions', outline);
           const actionsResult = await fetchSceneActions(
             {
@@ -828,6 +838,7 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
                 settings.ttsProvidersConfig?.[settings.ttsProviderId],
               )
             ) {
+              setPhase('tts');
               const ttsResult = await generateTTSForScene(
                 scene,
                 params.languageDirective || params.stageInfo.language,
@@ -855,6 +866,9 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
 
             removeGeneratingOutline(outline.id);
             useStageStore.getState().addScene(scene);
+            // The scene materialized — the next iteration (or batch end) sets the
+            // next phase; between the two the panel is gone anyway.
+            setPhase('idle');
             options.onSceneGenerated?.(scene, outline.order);
             previousSpeeches = actionsResult.previousSpeeches || [];
           } else {
@@ -893,6 +907,9 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
       } finally {
         generatingRef.current = false;
         fetchAbortRef.current = null;
+        // Every exit path (batch completion, pause-on-failure, abort, throw)
+        // leaves the phase reset so no stale stage lingers in the panel.
+        setPhase('idle');
       }
     },
     [options, store],
@@ -941,6 +958,12 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
         store.getState().setGeneratingOutlines(current.filter((o) => o.id !== outlineId));
       };
 
+      // Same progress-panel contract as generateRemaining: the phase follows
+      // this retry's serial pipeline (content → actions → TTS) and resets to
+      // idle on every exit path — failure, epoch change, landing, or throw.
+      const setPhase = (phase: GenerationPhase) =>
+        store.getState().setCurrentGeneratingPhase(phase);
+
       // Remove from failed list and mark as generating
       store.getState().retryFailedOutline(outlineId);
       store.getState().setGenerationStatus('generating');
@@ -953,6 +976,11 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
       const signal = abortController.signal;
 
       try {
+        // Seed the progress panel for the retried page before the pipeline runs.
+        store.getState().setCurrentGeneratingOrder(outline.order);
+        store.getState().setCurrentGeneratingStartedAt(Date.now());
+        setPhase('content');
+
         // Step 1: Content
         const contentResult = await fetchSceneContent(
           {
@@ -970,10 +998,12 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
 
         if (!contentResult.success || !contentResult.content) {
           store.getState().addFailedOutline(outline);
+          setPhase('idle');
           return;
         }
 
         // Step 2: Actions
+        setPhase('actions');
         const sortedScenes = [...store.getState().scenes].sort((a, b) => a.order - b.order);
         const lastScene = sortedScenes[sortedScenes.length - 1];
         const previousSpeeches = lastScene
@@ -998,6 +1028,7 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
 
         if (!actionsResult.success || !actionsResult.scene) {
           store.getState().addFailedOutline(outline);
+          setPhase('idle');
           return;
         }
 
@@ -1011,6 +1042,7 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
             settings.ttsProvidersConfig?.[settings.ttsProviderId],
           )
         ) {
+          setPhase('tts');
           const ttsResult = await generateTTSForScene(
             actionsResult.scene,
             params.languageDirective || params.stageInfo.language,
@@ -1018,17 +1050,20 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
           );
           if (!ttsResult.success) {
             store.getState().addFailedOutline(outline);
+            setPhase('idle');
             return;
           }
         }
 
         if (store.getState().generationEpoch !== retryEpoch) {
           await removeFreshTtsAllocations(speechAllocationIds(actionsResult.scene));
+          setPhase('idle');
           return;
         }
 
         removeGeneratingOutline();
         useStageStore.getState().addScene(actionsResult.scene);
+        setPhase('idle');
 
         // Resume remaining generation if there are pending outlines
         if (store.getState().generatingOutlines.length > 0 && lastParamsRef.current) {
@@ -1041,6 +1076,7 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
           store.getState().markGenerationCompleteIfDone();
         }
       } catch (err) {
+        setPhase('idle');
         if (!isAbortError(err)) {
           store.getState().addFailedOutline(outline);
         }

@@ -231,7 +231,19 @@
     "exitFullscreen": "Thoát toàn màn hình",
     "editCourse": "Sửa bài học",
     "doneEditing": "Sửa xong",
-    "proModeDisabledHint": "Trang này không sửa được — hãy mở một slide bài học để dùng chế độ Pro."
+    "proModeDisabledHint": "Trang này không sửa được — hãy mở một slide bài học để dùng chế độ Pro.",
+    "generationProgress": {
+      "title": "Đang tạo nội dung bài học",
+      "stepContent": "Soạn nội dung",
+      "stepActions": "Xếp dựng hành động",
+      "stepTts": "Tổng hợp giọng đọc",
+      "pageProgress": "Trang {{page}} / {{total}}",
+      "completedCount": "Đã xong {{count}} trang",
+      "remainingCount": "Còn lại {{count}} trang",
+      "mediaGenerating": "Đang tạo {{count}} phương tiện",
+      "mediaDone": "Đã xong {{count}} phương tiện",
+      "reassurance": "Trang này nhiều nội dung — AI vẫn đang tạo, vui lòng đợi thêm…"
+    }
   },
   "edit": {
     "proMode": "Pro",

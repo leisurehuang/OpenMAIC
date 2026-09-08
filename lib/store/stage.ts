@@ -219,6 +219,8 @@ function clearedStageState(state: Pick<StageState, 'generationEpoch'>) {
     generationEpoch: state.generationEpoch + 1,
     generationStatus: 'idle' as const,
     currentGeneratingOrder: -1,
+    currentGeneratingPhase: 'idle' as const,
+    currentGeneratingStartedAt: 0,
     failedOutlines: [],
     generatingOutlines: [],
   };
@@ -261,6 +263,9 @@ export function isCurrentStageSceneLoadToken(token: StageSceneLoadToken): boolea
 }
 
 type ToolbarState = 'design' | 'ai';
+
+/** Pipeline stage of the outline currently being assembled by the scene generator. */
+export type GenerationPhase = 'idle' | 'content' | 'actions' | 'tts';
 
 function mergeSceneContentForUpdate(
   current: SceneContent,
@@ -328,6 +333,10 @@ interface StageState {
   generationEpoch: number;
   generationStatus: 'idle' | 'generating' | 'paused' | 'completed' | 'error';
   currentGeneratingOrder: number;
+  /** Pipeline stage of the outline being assembled (content → actions → tts). */
+  currentGeneratingPhase: GenerationPhase;
+  /** Wall-clock ms when the current outline's generation started (elapsed-time UI). */
+  currentGeneratingStartedAt: number;
   failedOutlines: SceneOutline[];
 
   // Workbench canvas-freshness projections (Mono #1960 Part 2 port).
@@ -365,6 +374,8 @@ interface StageState {
   setViewerAccess: (access: { isOwner: boolean }) => void;
   setGenerationStatus: (status: 'idle' | 'generating' | 'paused' | 'completed' | 'error') => void;
   setCurrentGeneratingOrder: (order: number) => void;
+  setCurrentGeneratingPhase: (phase: GenerationPhase) => void;
+  setCurrentGeneratingStartedAt: (startedAt: number) => void;
   bumpGenerationEpoch: () => void;
   addFailedOutline: (outline: SceneOutline) => void;
   clearFailedOutlines: () => void;
@@ -483,6 +494,8 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
   generationEpoch: 0,
   generationStatus: 'idle' as const,
   currentGeneratingOrder: -1,
+  currentGeneratingPhase: 'idle' as const,
+  currentGeneratingStartedAt: 0,
   failedOutlines: [],
   serverManifestByStage: {},
   stageSyncRequest: 0,
@@ -788,6 +801,9 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
   setGenerationStatus: (generationStatus) => set({ generationStatus }),
 
   setCurrentGeneratingOrder: (currentGeneratingOrder) => set({ currentGeneratingOrder }),
+  setCurrentGeneratingPhase: (currentGeneratingPhase) => set({ currentGeneratingPhase }),
+  setCurrentGeneratingStartedAt: (currentGeneratingStartedAt) =>
+    set({ currentGeneratingStartedAt }),
 
   bumpGenerationEpoch: () => set((s) => ({ generationEpoch: s.generationEpoch + 1 })),
 
@@ -1072,6 +1088,12 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
           // mode='edit'. Refresh already reset via initial store value;
           // this normalises the SPA path to match.
           mode: 'playback',
+          // Same reasoning for the transient generation-phase tracking: a warm
+          // store that was mid-generation would otherwise leak the previous
+          // classroom's phase/elapsed clock into this one's pending view until
+          // the resume loop overwrites it.
+          currentGeneratingPhase: 'idle',
+          currentGeneratingStartedAt: 0,
         });
         resetPendingChanges(stageId);
         if (generationComplete && !persistedComplete) void get().saveToStorage();

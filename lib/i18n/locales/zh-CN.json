@@ -231,7 +231,19 @@
     "exitFullscreen": "退出全屏",
     "editCourse": "编辑课程",
     "doneEditing": "完成编辑",
-    "proModeDisabledHint": "本页不支持编辑——打开任意课程页即可使用 Pro 模式编辑。"
+    "proModeDisabledHint": "本页不支持编辑——打开任意课程页即可使用 Pro 模式编辑。",
+    "generationProgress": {
+      "title": "正在生成课程内容",
+      "stepContent": "撰写内容",
+      "stepActions": "编排动作",
+      "stepTts": "合成配音",
+      "pageProgress": "第 {{page}} / {{total}} 页",
+      "completedCount": "已完成 {{count}} 页",
+      "remainingCount": "剩余 {{count}} 页",
+      "mediaGenerating": "素材生成中 {{count}} 项",
+      "mediaDone": "素材已完成 {{count}} 项",
+      "reassurance": "本页内容较多，AI 仍在努力生成，请耐心等待…"
+    }
   },
   "edit": {
     "proMode": "专业模式",
