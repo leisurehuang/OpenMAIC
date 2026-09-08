@@ -83,36 +83,33 @@ async function verifySessionCookie(value: string): Promise<boolean> {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // --- 登录认证门（OPENMAIC_AUTH_REQUIRED=true 时启用，优先于访问码）---
+  // --- 登录认证门（注册登录为标准流程，未登录一律拦截，优先于访问码）---
   // Edge 无法查库：这里验签 cookie 的自包含 HMAC 签名（与
   // lib/server/auth.ts 的 parseSessionCookieValue 保持一致），保证没有
   // 密钥的访问者无法伪造任何“看起来登录了”的请求。数据库侧的会话校验
   // 与吊销仍在 Node 路由层完成。
-  const authRequired = /^(true|1)$/i.test((process.env.OPENMAIC_AUTH_REQUIRED ?? '').trim());
-  if (authRequired) {
-    // 白名单：登录页、认证接口、健康检查
-    if (pathname === '/login' || pathname.startsWith('/api/auth/') || pathname === '/api/health') {
-      return NextResponse.next();
-    }
-
+  // 白名单：登录页、认证接口、健康检查。其余请求：验签通过则落入后续
+  // 门（访问码等），否则未登录一律拦截。
+  const whitelisted =
+    pathname === '/login' || pathname.startsWith('/api/auth/') || pathname === '/api/health';
+  if (!whitelisted) {
     const session = request.cookies.get('openmaic_session')?.value;
-    if (session && (await verifySessionCookie(session))) {
-      return NextResponse.next();
+    const authenticated = session ? await verifySessionCookie(session) : false;
+    if (!authenticated) {
+      if (pathname.startsWith('/api/')) {
+        return NextResponse.json(
+          { success: false, errorCode: 'UNAUTHENTICATED', error: 'Authentication required' },
+          { status: 401 },
+        );
+      }
+      const loginUrl = request.nextUrl.clone();
+      loginUrl.pathname = '/login';
+      loginUrl.search = '';
+      return NextResponse.redirect(loginUrl);
     }
-
-    if (pathname.startsWith('/api/')) {
-      return NextResponse.json(
-        { success: false, errorCode: 'UNAUTHENTICATED', error: 'Authentication required' },
-        { status: 401 },
-      );
-    }
-    const loginUrl = request.nextUrl.clone();
-    loginUrl.pathname = '/login';
-    loginUrl.search = '';
-    return NextResponse.redirect(loginUrl);
   }
 
-  // --- 访问码门（原有机制，登录认证未启用时生效）---
+  // --- 访问码门（可选：在登录门之上叠加 ACCESS_CODE 校验）---
 
   // Return an actual server-side 404 when either half of the workbench is off.
   // Edge middleware cannot reliably inspect server-only deployment variables,

@@ -26,10 +26,12 @@ const SESSION_USER_ID_HEX_LENGTH = 16; // 8 bytes
 const SESSION_TOKEN_HEX_LENGTH = 64; // 32 bytes
 const SCRYPT_KEYLEN = 64;
 
-/** 登录认证开关（运行时环境变量，服务端生效）。 */
+/**
+ * 登录认证开关。注册登录是标准流程（原 OPENMAIC_AUTH_REQUIRED 可选
+ * 开关已移除）：每个部署都要求已登录会话，恒为必选。
+ */
 export function isAuthRequired(): boolean {
-  const raw = process.env.OPENMAIC_AUTH_REQUIRED?.trim().toLowerCase();
-  return raw === 'true' || raw === '1';
+  return true;
 }
 
 export interface AuthUser {
@@ -69,7 +71,7 @@ export async function ensureAuthSchema(pool: Pool): Promise<void> {
 
 async function authPool(): Promise<Pool> {
   const connectionString = process.env.DATABASE_URL?.trim();
-  if (!connectionString) throw new Error('OPENMAIC_AUTH_REQUIRED needs DATABASE_URL');
+  if (!connectionString) throw new Error('Login auth (standard flow) requires DATABASE_URL');
   const { pool } = await getServerPersistenceProvider(connectionString);
   await ensureAuthSchema(pool);
   return pool;

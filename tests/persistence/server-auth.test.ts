@@ -2,6 +2,14 @@ import type { IncomingMessage } from 'node:http';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// 注册登录是标准流程（isAuthRequired 恒 true）；本套件钉住的是 dev-token
+// 匿名方案的行为，mock 关闭登录开关保住该分支的覆盖。
+vi.mock('@/lib/server/auth', () => ({
+  isAuthRequired: () => false,
+  resolveSessionUserFromCookieValue: async () => undefined,
+  resolveSessionUser: async () => undefined,
+}));
+
 import { authenticatePersistenceRequest } from '@/lib/persistence/server-auth';
 
 function request(headers: IncomingMessage['headers']): IncomingMessage {
