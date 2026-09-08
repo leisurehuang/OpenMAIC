@@ -1,15 +1,13 @@
 /**
- * DEVELOPMENT-ONLY authentication for the embedded persistence route.
- *
- * The token is NOT a secret: NEXT_PUBLIC_PERSISTENCE_TOKEN is compiled into
- * the public browser bundle, so it is fully visible to every visitor and
- * provides no confidentiality and no user isolation — anyone who can load the
- * page can read and write EVERY learner partition and all documents by
- * supplying an arbitrary x-learner-key. Its only purpose is to keep unrelated
- * network scanners out of a trusted-network endpoint. Suitable only for
- * localhost or trusted-network, single-user deployments. Production must
- * replace this module with real session verification and derive learner
- * identity from server-controlled claims.
+ * DEVELOPMENT-ONLY fallback authentication for the embedded persistence
+ * route, used only when login auth is disabled (PERSISTENCE_DEV_TOKEN on
+ * both ends — the server-side twin that browsers used to pair with via the
+ * now-removed NEXT_PUBLIC_PERSISTENCE_TOKEN). The token is NOT a secret and
+ * provides no confidentiality and no user isolation — anyone who can load
+ * the page can read and write EVERY learner partition and all documents by
+ * supplying an arbitrary x-learner-key. Its only purpose is to keep
+ * unrelated network scanners out of a trusted-network endpoint. Suitable
+ * only for localhost or trusted-network, single-user deployments.
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';

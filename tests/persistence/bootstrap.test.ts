@@ -32,7 +32,6 @@ describe('persistence client bootstrap', () => {
   });
 
   it('configures runtime and document HTTP stores without wiring the asset pool', async () => {
-    vi.stubEnv('NEXT_PUBLIC_PERSISTENCE_TOKEN', 'test-dev-token');
     vi.stubGlobal('window', { __OPENMAIC_PERSISTENCE_CONFIGURED__: true });
     vi.stubGlobal('localStorage', memoryStorage());
 
@@ -65,7 +64,8 @@ describe('persistence client bootstrap', () => {
         headersHook: (context: { method: string; path: string }) => Promise<HeadersInit>;
       }
     ).headersHook({ method: 'GET', path: '/runtime/sessions/example' });
-    expect(new Headers(runtimeHeaders).get('authorization')).toBe('Bearer test-dev-token');
+    // 鉴权完全由 session cookie 承担：请求头只携带分区键，没有任何令牌。
+    expect(new Headers(runtimeHeaders).get('authorization')).toBeNull();
     expect(new Headers(runtimeHeaders).get('x-learner-key')).toMatch(/^anon:/);
 
     runtime.resetRuntimeStorageForTests();

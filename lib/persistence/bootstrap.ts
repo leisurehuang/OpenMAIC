@@ -48,17 +48,6 @@ export function isAccountScopeServerBacked(): Promise<boolean> {
 }
 
 /**
- * Build-time opt-in for single-library deployments: when set, every browser
- * resolves the same learner partition instead of a per-device anonymous key,
- * so account-scoped settings (provider/model configuration) sync across the
- * trusted learning group. Must be empty for per-learner deployments.
- */
-function sharedLearnerKeyOverride(): string | undefined {
-  const raw = process.env.NEXT_PUBLIC_SHARED_LEARNER_KEY;
-  return raw?.trim() || undefined;
-}
-
-/**
  * 登录认证探测结果。
  * - `'disabled'`：构建期未启用登录认证（开发令牌模式，无需探测）。
  * - `'signed-out'`：登录认证开启，且 `/api/auth/me` 明确报告没有登录用户
@@ -111,10 +100,10 @@ function loginLearnerKey(): Promise<string | undefined> {
 export function getPersistenceLearnerKey(): Promise<string> {
   if (learnerKeyPromise) return learnerKeyPromise;
   learnerKeyPromise = (async () => {
+    // 登录是标准流程：learner 键优先来自登录会话；探测失败/未登录时回退
+    // 到本设备的匿名键（仅本地/匿名分区，登录后走既有迁移路径）。
     const loginKey = await loginLearnerKey();
     if (loginKey) return loginKey;
-    const shared = sharedLearnerKeyOverride();
-    if (shared) return shared;
     return getLearnerKey((deviceKv ??= new BrowserKVStore()));
   })().catch(
     (error) => {
@@ -127,12 +116,9 @@ export function getPersistenceLearnerKey(): Promise<string> {
 
 export async function getPersistenceRequestHeaders(): Promise<Record<string, string>> {
   if (!isBrowserPersistenceEnabled()) return {};
+  // 鉴权完全由登录 session cookie 承担；浏览器不再携带任何构建期令牌。
   const resolvedLearnerKey = await getPersistenceLearnerKey();
-  const token = process.env.NEXT_PUBLIC_PERSISTENCE_TOKEN;
-  return {
-    'x-learner-key': resolvedLearnerKey,
-    ...(token ? { authorization: `Bearer ${token}` } : {}),
-  };
+  return { 'x-learner-key': resolvedLearnerKey };
 }
 
 if (isBrowserPersistenceEnabled()) {
