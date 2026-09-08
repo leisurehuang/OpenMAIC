@@ -125,12 +125,17 @@ class AccountMigratingKVStore implements KVStore {
 /**
  * account 作用域本次会话留在本机：未登录（服务端会 401，避免误报存储
  * 故障），或运行时探测到服务端未配置持久化（无 DATABASE_URL）。
- * 两个结论都按页面缓存，探测结果不随单次请求抖动翻转。
+ * 两个结论并行取得：zustand persist 的首次读在冷启动时与初始化器写
+ * 竞争，串行探测会把“未就绪拒写”的窗口拉长到必现。
  */
 async function accountScopeStaysLocal(): Promise<boolean> {
   // 同步标志明确未配置时短路：未配库的部署零网络请求，留在本机。
   if (!isBrowserPersistenceEnabled()) return true;
-  return (await isLoginAuthSignedOut()) || !(await isAccountScopeServerBacked());
+  const [signedOut, serverBacked] = await Promise.all([
+    isLoginAuthSignedOut(),
+    isAccountScopeServerBacked(),
+  ]);
+  return signedOut || !serverBacked;
 }
 
 export function createDefaultAppKVStore(): KVStore {

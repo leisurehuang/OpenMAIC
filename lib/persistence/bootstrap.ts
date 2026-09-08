@@ -122,6 +122,11 @@ export async function getPersistenceRequestHeaders(): Promise<Record<string, str
 }
 
 if (isBrowserPersistenceEnabled()) {
+  // 预热两路探测：登录态与持久化可用性在 zustand persist 冷启动 hydrate
+  // 之前就并行在飞，首次 KV 读等待的窗口不再叠加串行往返。
+  void probeLoginAuth();
+  void isAccountScopeServerBacked();
+
   const learnerKey = getPersistenceLearnerKey;
   const headers = getPersistenceRequestHeaders;
 

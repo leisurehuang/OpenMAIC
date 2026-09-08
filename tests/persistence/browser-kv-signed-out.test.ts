@@ -89,9 +89,11 @@ describe('browser-kv account scope under login auth', () => {
     await kv.remove('settings-storage', 'account');
     expect(await kv.get('settings-storage', 'account')).toBeNull();
 
-    // 认证探测只发生一次（按页面缓存），且全程没有任何服务端 KV 请求。
+    // 认证探测只发生一次（按页面缓存）；KV 面仅有冷启动预热的可用性
+    // 探测一次（未登录时它拿 401，但结论不影响留在本机的决定），
+    // 没有任何 entries 读写。
     expect(log.meCalls).toBe(1);
-    expect(log.persistenceCalls).toEqual([]);
+    expect(log.persistenceCalls).toEqual(['GET /api/persistence/kv/keys?prefix=__probe__']);
     // 本地读写不应触发任何持久化健康事件（那是两条用户可见告警的来源）。
     expect(healthEvents).toEqual([]);
     unsubscribe();
