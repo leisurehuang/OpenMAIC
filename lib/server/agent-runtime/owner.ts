@@ -20,8 +20,8 @@ function readCookie(headers: Headers, name: string): string | undefined {
 }
 
 function anonymousCookieHeader(id: string): string {
-  // Match the access-code cookie: Secure is opt-in via COOKIE_SECURE so the
-  // identity survives on plain-HTTP self-hosted deployments.
+  // Secure is opt-in via COOKIE_SECURE so the identity survives on plain-HTTP
+  // self-hosted deployments.
   const secure = process.env.COOKIE_SECURE === 'true' ? '; Secure' : '';
   return (
     `${ANONYMOUS_COOKIE}=${id}; Path=/; HttpOnly; SameSite=Lax; ` +

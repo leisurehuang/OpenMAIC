@@ -14,35 +14,6 @@ function bufToHex(buf: ArrayBuffer): string {
     .join('');
 }
 
-/** Verify an HMAC-signed token using Web Crypto API (Edge-compatible) */
-async function verifyToken(token: string, accessCode: string): Promise<boolean> {
-  const dotIndex = token.indexOf('.');
-  if (dotIndex === -1) return false;
-
-  const timestamp = token.substring(0, dotIndex);
-  const signature = token.substring(dotIndex + 1);
-
-  const keyData = encode(accessCode);
-  const key = await crypto.subtle.importKey(
-    'raw',
-    keyData.buffer as ArrayBuffer,
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-
-  const data = encode(timestamp);
-  const expected = bufToHex(await crypto.subtle.sign('HMAC', key, data.buffer as ArrayBuffer));
-
-  // Constant-length comparison (not truly constant-time in JS, but sufficient here)
-  if (signature.length !== expected.length) return false;
-  let mismatch = 0;
-  for (let i = 0; i < signature.length; i++) {
-    mismatch |= signature.charCodeAt(i) ^ expected.charCodeAt(i);
-  }
-  return mismatch === 0;
-}
-
 /**
  * 验证登录会话 cookie `<userId>.<token>.<hmac>` 的签名（Edge 版，与
  * lib/server/auth.ts 的 parseSessionCookieValue / sessionSigningSecret 保持
@@ -109,9 +80,7 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // --- 访问码门（可选：在登录门之上叠加 ACCESS_CODE 校验）---
-
-  // Return an actual server-side 404 when either half of the workbench is off.
+  // --- Workbench 门：任一半未启用时返回真实 404 ---
   // Edge middleware cannot reliably inspect server-only deployment variables,
   // so it enforces the public gate and leaves the complete runtime/database
   // check to Node. A Node-hosted middleware uses the same gate as startup.
@@ -122,31 +91,6 @@ export async function middleware(request: NextRequest) {
     return new NextResponse('Not found', { status: 404 });
   }
 
-  const accessCode = process.env.ACCESS_CODE;
-  if (!accessCode) {
-    return NextResponse.next();
-  }
-
-  // Whitelist: access-code endpoints, health check
-  if (pathname.startsWith('/api/access-code/') || pathname === '/api/health') {
-    return NextResponse.next();
-  }
-
-  // Check cookie — validate HMAC signature, not just existence
-  const cookie = request.cookies.get('openmaic_access');
-  if (cookie?.value && (await verifyToken(cookie.value, accessCode))) {
-    return NextResponse.next();
-  }
-
-  // API requests without valid cookie → 401
-  if (pathname.startsWith('/api/')) {
-    return NextResponse.json(
-      { success: false, errorCode: 'INVALID_REQUEST', error: 'Access code required' },
-      { status: 401 },
-    );
-  }
-
-  // Page requests → let through, frontend shows modal
   return NextResponse.next();
 }
 
