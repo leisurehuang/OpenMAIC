@@ -1147,6 +1147,7 @@
   "settings": {
     "title": "설정",
     "description": "앱 설정 구성",
+    "logout": "로그아웃",
     "language": "언어",
     "languageDesc": "인터페이스 언어 선택",
     "theme": "테마",

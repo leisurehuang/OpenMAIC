@@ -43,10 +43,9 @@ export type LoginAuthProbe = 'disabled' | 'signed-out' | 'probe-failed' | (strin
 let loginAuthProbePromise: Promise<LoginAuthProbe> | undefined;
 
 function probeLoginAuth(): Promise<LoginAuthProbe> {
-  const enabled = /^(1|true)$/i.test((process.env.NEXT_PUBLIC_AUTH_REQUIRED ?? '').trim());
-  if (!enabled) return Promise.resolve('disabled');
-  // 按页面缓存一次：登录 / 注册 / 登出都伴随整页跳转（页面级缓存不会跨
-  // 身份切换失效），而每次 KV 读写都重新探测会把 /api/auth/me 变成热点。
+  // 注册登录是标准流程：恒探测 /api/auth/me。按页面缓存一次：登录 /
+  // 注册 / 登出都伴随整页跳转（页面级缓存不会跨身份切换失效），而每次
+  // KV 读写都重新探测会把 /api/auth/me 变成热点。
   loginAuthProbePromise ??= fetch('/api/auth/me', { credentials: 'include' })
     .then(async (res) => {
       if (!res.ok) return 'probe-failed' as const;

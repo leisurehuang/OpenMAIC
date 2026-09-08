@@ -1147,6 +1147,7 @@
   "settings": {
     "title": "Paramètres",
     "description": "Configurer les paramètres de l’application",
+    "logout": "Se déconnecter",
     "language": "Langue",
     "languageDesc": "Choisir la langue de l’interface",
     "theme": "Thème",

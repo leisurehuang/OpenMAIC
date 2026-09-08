@@ -65,7 +65,6 @@ describe('browser-kv account scope under login auth', () => {
     vi.unstubAllGlobals();
     vi.stubEnv('NEXT_PUBLIC_PERSISTENCE', '1');
     vi.stubEnv('NEXT_PUBLIC_PERSISTENCE_TOKEN', 'test-dev-token');
-    vi.stubEnv('NEXT_PUBLIC_AUTH_REQUIRED', '1');
     vi.stubGlobal('window', {});
     vi.stubGlobal('localStorage', memoryStorage());
   });

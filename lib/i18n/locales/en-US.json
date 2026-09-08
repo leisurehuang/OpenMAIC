@@ -1147,6 +1147,7 @@
   "settings": {
     "title": "Settings",
     "description": "Configure application settings",
+    "logout": "Sign out",
     "language": "Language",
     "languageDesc": "Select interface language",
     "theme": "Theme",

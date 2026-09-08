@@ -1147,6 +1147,7 @@
   "settings": {
     "title": "Einstellungen",
     "description": "Anwendungseinstellungen konfigurieren",
+    "logout": "Abmelden",
     "language": "Sprache",
     "languageDesc": "Sprache der Benutzeroberfläche auswählen",
     "theme": "Design",

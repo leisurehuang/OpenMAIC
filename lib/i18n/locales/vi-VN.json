@@ -1147,6 +1147,7 @@
   "settings": {
     "title": "Cài đặt",
     "description": "Thiết lập ứng dụng",
+    "logout": "Đăng xuất",
     "language": "Ngôn ngữ",
     "languageDesc": "Chọn ngôn ngữ giao diện",
     "theme": "Giao diện",

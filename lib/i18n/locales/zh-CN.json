@@ -1147,6 +1147,7 @@
   "settings": {
     "title": "设置",
     "description": "配置应用程序设置",
+    "logout": "退出登录",
     "language": "语言",
     "languageDesc": "选择界面语言",
     "theme": "主题",

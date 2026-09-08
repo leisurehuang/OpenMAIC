@@ -1147,6 +1147,7 @@
   "settings": {
     "title": "الإعدادات",
     "description": "تكوين إعدادات التطبيق",
+    "logout": "تسجيل الخروج",
     "language": "اللغة",
     "languageDesc": "اختر لغة الواجهة",
     "theme": "المظهر",

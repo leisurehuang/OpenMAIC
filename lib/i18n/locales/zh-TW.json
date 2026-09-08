@@ -1132,6 +1132,7 @@
   "settings": {
     "title": "設定",
     "description": "設定應用程式設定",
+    "logout": "登出",
     "language": "語言",
     "languageDesc": "選擇介面語言",
     "theme": "主題",

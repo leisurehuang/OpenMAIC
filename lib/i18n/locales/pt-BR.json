@@ -1147,6 +1147,7 @@
   "settings": {
     "title": "Configurações",
     "description": "Configurar opções do aplicativo",
+    "logout": "Sair",
     "language": "Idioma",
     "languageDesc": "Selecione o idioma da interface",
     "theme": "Tema",

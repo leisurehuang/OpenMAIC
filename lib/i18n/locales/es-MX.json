@@ -1147,6 +1147,7 @@
   "settings": {
     "title": "Configuración",
     "description": "Configura los ajustes de la aplicación",
+    "logout": "Cerrar sesión",
     "language": "Idioma",
     "languageDesc": "Selecciona el idioma de la interfaz",
     "theme": "Tema",

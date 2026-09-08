@@ -803,20 +803,19 @@ function HomePage() {
           </button>
         </div>
 
-        {/* Logout（仅登录认证模式显示）*/}
-        {/^(1|true)$/i.test(process.env.NEXT_PUBLIC_AUTH_REQUIRED ?? '') && (
-          <button
-            title="登出"
-            onClick={() => {
-              void fetch('/api/auth/logout', { method: 'POST' }).finally(() => {
-                window.location.href = '/login';
-              });
-            }}
-            className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200 hover:shadow-sm transition-all"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
-        )}
+        {/* Logout（登录是标准流程，入口恒驻）*/}
+        <button
+          title={t('settings.logout')}
+          aria-label={t('settings.logout')}
+          onClick={() => {
+            void fetch('/api/auth/logout', { method: 'POST' }).finally(() => {
+              window.location.href = '/login';
+            });
+          }}
+          className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200 hover:shadow-sm transition-all"
+        >
+          <LogOut className="w-4 h-4" />
+        </button>
       </div>
       <SettingsDialog
         open={settingsOpen}
