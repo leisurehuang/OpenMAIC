@@ -27,6 +27,16 @@ import { ProSwapWatcher } from '@/components/workbench/ProSwapWatcher';
 // next/font's generated class.
 import '@fontsource-variable/inter';
 
+// The persistence flag below reads DATABASE_URL at render time. Without this,
+// every route without its own `dynamic` export (/ , /login, /_not-found …) is
+// prerendered at build time — and production images build without .env*, so
+// the injected script bakes `false` into the HTML forever. The browser then
+// keeps the account scope on localStorage and settings never sync to the
+// server, so the same account starts unconfigured on every other browser.
+// force-dynamic on the root layout keeps the flag request-scoped for every
+// route, mirroring the per-page exports on /workspace and /workbench/new.
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: 'OpenMAIC',
   description:
