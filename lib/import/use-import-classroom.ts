@@ -18,6 +18,7 @@ import { createLogger } from '@/lib/logger';
 import { canonicalizeLegacyScene, mutateDocument, type AppDocument } from '@/lib/document-store';
 import { isConcreteMediaAddress } from '@/lib/media/resolve-media-ref';
 import { isGeneratedMediaPlaceholder } from '@/lib/media/media-ref';
+import { uploadRemoteMedia } from '@/lib/media/remote-media';
 import type JSZip from 'jszip';
 import type { Slide } from '@openmaic/dsl';
 import type { Stage } from '@/lib/types/stage';
@@ -225,6 +226,8 @@ export async function materializeImportedAudio(
       createdAt,
     };
     await db.audioFiles.put(record);
+    // 导入的旁白字节同样上云（best-effort，失败留在本地）。
+    void uploadRemoteMedia({ stageId, ref: audioId, kind: 'audio', blob });
   }
   return { pathToId, sourceRefToId };
 }
@@ -284,6 +287,7 @@ export async function materializeImportedMedia(
       params: '',
       createdAt,
     });
+    void uploadRemoteMedia({ stageId, ref: mediaId, kind: 'media', blob });
     imported.push({ oldRef, assetId: mediaId, type, posterBlob, prompt: meta.prompt });
   }
 
@@ -306,11 +310,12 @@ export async function materializeImportedMedia(
         blob: entry.posterBlob,
         mimeType: entry.posterBlob.type || 'image/jpeg',
         size: entry.posterBlob.size,
-        prompt: entry.prompt || '',
-        params: '',
-        createdAt,
-      });
-    }
+      prompt: entry.prompt || '',
+      params: '',
+      createdAt,
+    });
+    void uploadRemoteMedia({ stageId, ref: posterAssetId, kind: 'media', blob: entry.posterBlob });
+  }
     posterByMediaRef.set(entry.oldRef, posterAssetId);
     for (const oldPosterRef of oldPosterRefs) {
       posterRefToNewId.set(oldPosterRef, posterAssetId);

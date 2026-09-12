@@ -6,6 +6,7 @@ import {
   type StageAudioRow,
   type StageMediaRow,
 } from './collect-stage-asset-refs';
+import { deleteRemoteMediaForStage } from './remote-media';
 import { db, type AudioFileRecord, type MediaFileRecord } from '@/lib/utils/database';
 
 /**
@@ -87,6 +88,10 @@ export async function executeStageAssetReclamation(
   void deletedDocument;
 
   const liveRefs = await loadSurvivingDocumentAssetRefs();
+
+  // 服务端的媒体字节按课清理（best-effort：调用方已确认文档删除，本地行
+  // 随后删除，云端行删除失败只留下可再清理的孤儿字节，不影响正确性）。
+  deleteRemoteMediaForStage(plan.stageId);
 
   // Registry reclamation is intentionally unwired. Only stage-owned local
   // compatibility rows are removed.

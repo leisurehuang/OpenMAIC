@@ -21,10 +21,12 @@ import type { DocumentMigrationDeps } from '@/lib/document-store/migration';
 import type { PPTElement, Slide } from '@openmaic/dsl';
 import {
   collectDocumentMediaElements,
+  mediaTaskRefForElement,
   withDocumentLegacyVideoRecovery,
 } from '@/lib/media/media-task-resolution';
 import { slideMediaReferenceSlots } from '@/lib/media/slide-media-slots';
 import { isConcreteMediaAddress } from '@/lib/media/resolve-media-ref';
+import { fetchRemoteMedia, isMediaServerBacked } from '@/lib/media/remote-media';
 import { createLogger } from '@/lib/logger';
 
 const moduleLog = createLogger('ClassroomLoad');
@@ -356,10 +358,113 @@ export function collectPriorityMediaRefs(
   return refs;
 }
 
+/**
+ * 服务端字节回填：本机 Dexie 缺失（或空字节）的文档媒体，从按登录账号
+ * 分区的服务端字节仓取回，写回本地缓存并并入本次恢复。另一台浏览器上
+ * 生成的课件由此在本机渲染完整。全部 best-effort：服务端不可用 / 字节
+ * 缺失时按原样返回，媒体呈现占位并可重试生成。
+ *
+ * 回填对象与上传键一致：生成请求的 elementId（场景元素 id / 占位引用）。
+ * 媒体槽分两类来源：带 element 的（画布元素，经 collectDocumentMediaElements）
+ * 与不带 element 的背景图（单独遍历，背景图对象同样携带生成时分配的 id）。
+ */
+async function backfillRemoteMediaRecords(
+  stageId: string,
+  records: readonly MediaFileRecord[],
+): Promise<MediaFileRecord[]> {
+  if (!isMediaServerBacked()) return [...records];
+  const state = useStageStore.getState();
+  if (state.stage?.id !== stageId) return [...records];
+
+  const usableRefs = new Set<string>();
+  for (const record of records) {
+    const ref = record.id.includes(':') ? record.id.slice(record.id.indexOf(':') + 1) : record.id;
+    if (!record.error && ((record.blob && record.blob.size > 0) || record.ossKey)) {
+      usableRefs.add(ref);
+    }
+  }
+
+  const documentElements = collectDocumentMediaElements(state.stage, state.scenes);
+  const mediaCandidates: Array<{
+    elementId?: string;
+    ref?: string;
+    type: 'image' | 'video';
+  }> = [];
+  for (const element of documentElements) {
+    if (element.type !== 'image' && element.type !== 'video') continue;
+    mediaCandidates.push({
+      elementId: element.id || undefined,
+      ref: mediaTaskRefForElement(element),
+      type: element.type,
+    });
+  }
+  // 背景媒体槽不带 element：背景图对象在 DSL 里没有 id，其 src 引用本身
+  // 就是生成时上传的键（生成请求的 elementId 即占位引用）。
+  const backgroundPass = (slide: Pick<Slide, 'background'>) => {
+    const image = slide.background?.type === 'image' ? slide.background.image : undefined;
+    if (image?.src && !isConcreteMediaAddress(image.src)) {
+      mediaCandidates.push({ ref: image.src, type: 'image' });
+    }
+  };
+  for (const slide of state.stage?.whiteboard ?? []) backgroundPass(slide);
+  for (const scene of state.scenes) {
+    if (scene.content.type === 'slide') backgroundPass(scene.content.canvas);
+    for (const slide of scene.whiteboards ?? []) backgroundPass(slide);
+  }
+
+  const missing = mediaCandidates.filter(({ elementId, ref }) => {
+    const key = elementId ?? ref;
+    if (!key) return false;
+    return !usableRefs.has(key) && !(ref && usableRefs.has(ref));
+  });
+  if (missing.length === 0) return [...records];
+
+  const { db } = await import('@/lib/utils/database');
+  const backfilled: MediaFileRecord[] = [];
+  await Promise.all(
+    missing.map(async (candidate) => {
+      const ref = candidate.elementId ?? candidate.ref;
+      if (!ref) return;
+      const blob = await fetchRemoteMedia({ ref, kind: 'media' });
+      if (!blob) return;
+      const record: MediaFileRecord = {
+        // mediaFileKey 的复合键格式；不经模块导出，测试对 database 模块
+        // 的窄 mock 不提供该导出。
+        id: `${stageId}:${ref}`,
+        stageId,
+        type: candidate.type,
+        blob,
+        mimeType: blob.type || (candidate.type === 'video' ? 'video/mp4' : 'image/png'),
+        size: blob.size,
+        prompt: '',
+        params: '{}',
+        createdAt: Date.now(),
+        // 元素 id 与占位引用不同的（按 ref 的任务绑定）靠它接上。
+        ...(candidate.ref && candidate.ref !== ref ? { placeholderRef: candidate.ref } : {}),
+      };
+      if (candidate.type === 'video') {
+        const poster = await fetchRemoteMedia({ ref, kind: 'poster' });
+        if (poster) record.poster = poster;
+      }
+      await db.mediaFiles.put(record).catch(() => undefined);
+      backfilled.push(record);
+    }),
+  );
+  if (backfilled.length > 0) {
+    moduleLog.info(
+      `Backfilled ${backfilled.length} media byte(s) from the server for stage ${stageId}`,
+    );
+  }
+  return [...records, ...backfilled];
+}
+
 export async function loadRestoredMediaTasksFromDB(stageId: string): Promise<RestoredMediaTasks> {
   try {
     const { db } = await import('@/lib/utils/database');
-    const records = await db.mediaFiles.where('stageId').equals(stageId).toArray();
+    const records = await backfillRemoteMediaRecords(
+      stageId,
+      await db.mediaFiles.where('stageId').equals(stageId).toArray(),
+    );
     const state = useStageStore.getState();
     const sameStage = state.stage?.id === stageId;
     const documentElements = sameStage

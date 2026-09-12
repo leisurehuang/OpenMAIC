@@ -12,6 +12,7 @@ import { db, mediaFileKey } from '@/lib/utils/database';
 import type { SceneOutline } from '@/lib/types/generation';
 import type { MediaGenerationRequest } from '@/lib/media/types';
 import { fetchProxiedMediaUrl } from '@/lib/media/proxy-media-cache';
+import { uploadRemoteMedia } from '@/lib/media/remote-media';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('MediaOrchestrator');
@@ -177,6 +178,8 @@ async function generateSingleMedia(
         params: paramsJson,
         createdAt: Date.now(),
       });
+      // 服务端权威、本地缓存：字节随登录账号上云，其他浏览器经回填可读。
+      void uploadRemoteMedia({ stageId, ref: req.elementId, kind: 'media', blob });
       const objectUrl = URL.createObjectURL(blob);
       useMediaGenerationStore.getState().markDone(req.elementId, objectUrl);
     } else {
@@ -222,6 +225,10 @@ async function generateSingleMedia(
         params: paramsJson,
         createdAt: Date.now(),
       });
+      void uploadRemoteMedia({ stageId, ref: req.elementId, kind: 'media', blob });
+      if (posterBlob) {
+        void uploadRemoteMedia({ stageId, ref: req.elementId, kind: 'poster', blob: posterBlob });
+      }
       const objectUrl = URL.createObjectURL(blob);
       const posterObjectUrl = posterBlob ? URL.createObjectURL(posterBlob) : undefined;
       useMediaGenerationStore.getState().markDone(req.elementId, objectUrl, posterObjectUrl);

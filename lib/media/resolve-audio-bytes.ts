@@ -1,4 +1,5 @@
 import { db } from '@/lib/utils/database';
+import { fetchRemoteMedia } from './remote-media';
 import { isConcreteMediaAddress } from './resolve-media-ref';
 import { withAssetUrl } from './use-asset-url';
 
@@ -11,6 +12,11 @@ import { withAssetUrl } from './use-asset-url';
  * is current. Every consumer of allocated audio therefore resolves through this
  * one function, with Dexie kept as the fallback for legacy and imported rows
  * that were never pool-backed.
+ *
+ * The final fallback is the server-side byte store: narration generated on
+ * another browser (same login account) exists only there. Local bytes win so
+ * playback never waits on the network; a server miss keeps the reference
+ * retryable exactly as a local miss does.
  */
 export async function resolveAudioBlob(audioId: string): Promise<Blob | null> {
   const pooled = await pooledAudioBlob(audioId);
@@ -20,7 +26,8 @@ export async function resolveAudioBlob(audioId: string): Promise<Blob | null> {
   // Zero-byte rows (evicted, or an empty fetch) are not playable narration:
   // report no bytes so callers keep the reference retryable instead of
   // playing silence.
-  return bytes && bytes.size > 0 ? bytes : null;
+  if (bytes && bytes.size > 0) return bytes;
+  return fetchRemoteMedia({ ref: audioId, kind: 'audio' });
 }
 
 /** Resolve several ids at once, preserving input order. */

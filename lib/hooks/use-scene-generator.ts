@@ -28,6 +28,7 @@ import {
 import { resolveTTSModelForVoice } from '@/lib/audio/constants';
 import { useAgentRegistry } from '@/lib/orchestration/registry/store';
 import { generateMediaForOutlines } from '@/lib/media/media-orchestrator';
+import { uploadRemoteMedia } from '@/lib/media/remote-media';
 import { lazyBoundedMap } from '@/lib/utils/concurrency';
 import { createLogger } from '@/lib/logger';
 import { toast } from 'sonner';
@@ -481,6 +482,8 @@ export async function generateAndStoreTTS(
     voice: ttsVoice,
     createdAt: Date.now(),
   });
+  // 旁白字节随登录账号上云，其他浏览器经 resolveAudioBlob 的服务端回落可播。
+  if (stageId) void uploadRemoteMedia({ stageId, ref: audioId, kind: 'audio', blob });
   return audioId;
 }
 

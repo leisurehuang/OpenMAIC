@@ -1,5 +1,6 @@
 import { db, mediaFileKey, type MediaFileRecord } from '@/lib/utils/database';
 import { useMediaGenerationStore } from '@/lib/store/media-generation';
+import { fetchRemoteMedia } from './remote-media';
 import { withAssetUrl } from './use-asset-url';
 import { lookupMediaTask } from './media-task-resolution';
 import {
@@ -26,7 +27,9 @@ import {
  *    byte source when the local blob is empty -- a live-mode classroom whose
  *    local blobs were LRU-evicted under storage pressure still exports a
  *    self-contained archive.
- * 3. The URL the media-resolution state machine resolves from the task, for
+ * 3. The server byte store partitioned per login account -- media generated on
+ *    another browser of the same account lives only there.
+ * 4. The URL the media-resolution state machine resolves from the task, for
  *    generated media whose bytes never reached either store.
  *
  * The three historical callers (classroom ZIP, PPTX, video) differ in which
@@ -140,6 +143,13 @@ export async function resolveStoredBytes(
       if (state.kind === 'url') return stored;
     }
   }
+
+  // Server level: the byte store partitioned per login account. A classroom
+  // generated on another browser keeps its document on the server but not its
+  // local bytes; this is what lets exports still ship its media. Unavailable
+  // or missing server bytes fall through to the task-URL level unchanged.
+  const remote = await fetchRemoteMedia({ ref: effectiveRef, kind: 'media' });
+  if (remote) return remote;
 
   if (options.taskUrlFallback) {
     const state = resolveMediaRef(effectiveRef, task, MISSING_ASSET_LEASE);
