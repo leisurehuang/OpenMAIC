@@ -42,6 +42,13 @@ vi.mock('@/lib/server/agent-runtime/session-materials', async (importOriginal) =
     createSourceMaterial: mocks.createSourceMaterial,
   };
 });
+// 登录是标准流程：withRequestOwnerId 现在以登录会话为所有者分区来源，
+// 测试固定一个会话用户，让身份解析不依赖真实数据库。
+vi.mock('@/lib/server/auth', () => ({
+  isAuthRequired: () => true,
+  resolveSessionUser: async () => ({ id: 'u1', name: 'lei' }),
+}));
+
 vi.mock('@/lib/persistence/server-provider', () => ({
   getServerPersistenceProvider: async () => ({
     pool: mocks.queryPool,
