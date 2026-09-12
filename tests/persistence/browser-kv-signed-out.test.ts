@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * 登录认证部署中“未登录”状态下的 account 作用域 KV 行为。
+ * account 作用域 KV 的服务端唯一存储契约。
  *
- * 未登录（登录页 / 登出后 / 会话失效）时服务端中间件对 /api/persistence
- * 一律 401；若客户端仍请求服务端 KV，持久化层（kv-persist 的 KeyState）
- * 会把它当存储故障上报，向用户弹出“更改未被保存”告警。期望：探测到
- * signed-out 后 account 读写全部留在本机 localStorage，不发任何
- * /api/persistence 请求；探测失败（网络 / 5xx）则保持原有服务端路径。
+ * account 数据（用户设置）只存服务端，浏览器不保留任何本地副本：
+ * 未登录（登录页 / 登出后 / 会话失效）或服务端未配置持久化时，account
+ * 读写是静默 no-op——读为空、写丢弃、不发任何 /api/persistence 请求
+ * （未登录时请求只会拿到 401，被持久化层误报成「更改未被保存」）。
+ * 探测失败（网络 / 5xx）≠ 登出：保持服务端路径，让真实故障如实上报。
+ * device 作用域永远留在本机 localStorage；遗留的本机 account 副本在
+ * 创建默认 KVStore 时一次性清除。
  */
 
 function memoryStorage(): Storage {
@@ -64,11 +66,14 @@ describe('browser-kv account scope under login auth', () => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     // RootLayout SSR 注入的服务端配置标志：模拟配了 DATABASE_URL 的部署。
-    vi.stubGlobal('window', { __OPENMAIC_PERSISTENCE_CONFIGURED__: true });
+    vi.stubGlobal('window', {
+      __OPENMAIC_PERSISTENCE_CONFIGURED__: true,
+      localStorage: memoryStorage(),
+    });
     vi.stubGlobal('localStorage', memoryStorage());
   });
 
-  it('keeps account reads and writes local when the server says no user is signed in', async () => {
+  it('turns account reads and writes into no-ops when no user is signed in', async () => {
     const log = stubFetch(() => jsonResponse({ success: true, user: null }));
     const { createDefaultAppKVStore } = await import('@/lib/persistence/browser-kv');
     const { subscribeToPersistHealth } = await import('@/lib/store/persist-health');
@@ -81,25 +86,22 @@ describe('browser-kv account scope under login auth', () => {
     const kv = createDefaultAppKVStore();
     expect(await kv.get('settings-storage', 'account')).toBeNull();
     await kv.set('settings-storage', { state: { theme: 'dark' }, version: 1 }, 'account');
-    expect(await kv.get<{ state: { theme: string } }>('settings-storage', 'account')).toEqual({
-      state: { theme: 'dark' },
-      version: 1,
-    });
-    expect(await kv.keys('', 'account')).toEqual(['settings-storage']);
-    await kv.remove('settings-storage', 'account');
+    // 写被丢弃：不落本地，也没有任何服务端 entries 请求。
     expect(await kv.get('settings-storage', 'account')).toBeNull();
+    expect(await kv.keys('', 'account')).toEqual([]);
+    await kv.remove('settings-storage', 'account');
+    expect(localStorage.getItem('maic:account:settings-storage')).toBeNull();
 
     // 认证探测只发生一次（按页面缓存）；KV 面仅有冷启动预热的可用性
-    // 探测一次（未登录时它拿 401，但结论不影响留在本机的决定），
-    // 没有任何 entries 读写。
+    // 探测一次（未登录时它拿 401，但结论不影响 no-op 的决定）。
     expect(log.meCalls).toBe(1);
     expect(log.persistenceCalls).toEqual(['GET /api/persistence/kv/keys?prefix=__probe__']);
-    // 本地读写不应触发任何持久化健康事件（那是两条用户可见告警的来源）。
+    // no-op 不应触发任何持久化健康事件（那是两条用户可见告警的来源）。
     expect(healthEvents).toEqual([]);
     unsubscribe();
   });
 
-  it('still serves authenticated account traffic from the server', async () => {
+  it('serves authenticated account traffic from the server only', async () => {
     const log = stubFetch(
       () => jsonResponse({ success: true, user: { id: 'u1', name: 'a', learnerKey: 'user:u1' } }),
       (url, init) =>
@@ -121,6 +123,8 @@ describe('browser-kv account scope under login auth', () => {
     expect(log.meCalls).toBe(1);
     expect(log.persistenceCalls.length).toBeGreaterThan(0);
     expect(log.persistenceCalls.every((entry) => entry.startsWith('GET ') || entry.startsWith('PUT '))).toBe(true);
+    // 服务端唯一存储：写成功后本地也没有 account 副本。
+    expect(localStorage.getItem('maic:account:settings-storage')).toBeNull();
   });
 
   it('falls back to the server path (old behavior) when the auth probe fails', async () => {
@@ -139,5 +143,38 @@ describe('browser-kv account scope under login auth', () => {
       'GET /api/persistence/kv/keys?prefix=__probe__',
       'GET /api/persistence/kv/entries/settings-storage',
     ]);
+  });
+
+  it('keeps the device scope on the machine even when the account scope is unavailable', async () => {
+    stubFetch(() => jsonResponse({ success: true, user: null }));
+    const { createDefaultAppKVStore } = await import('@/lib/persistence/browser-kv');
+
+    const kv = createDefaultAppKVStore();
+    await kv.set('learner-key', 'anon-123', 'device');
+    expect(await kv.get('learner-key', 'device')).toBe('anon-123');
+    expect(localStorage.getItem('maic:device:learner-key')).toBe('"anon-123"');
+    expect(await kv.keys('', 'device')).toEqual(['learner-key']);
+    await kv.remove('learner-key', 'device');
+    expect(await kv.get('learner-key', 'device')).toBeNull();
+  });
+
+  it('purges legacy local account entries once, keeping device entries', async () => {
+    const storage = memoryStorage();
+    storage.setItem('maic:account:settings-storage', '{"state":{"theme":"dark"}}');
+    storage.setItem('maic:account:user-profile-storage', '{"state":{"name":"lei"}}');
+    storage.setItem('maic:device:learner-key', '"anon-123"');
+    vi.stubGlobal('localStorage', storage);
+    vi.stubGlobal('window', {
+      __OPENMAIC_PERSISTENCE_CONFIGURED__: true,
+      localStorage: storage,
+    });
+    stubFetch(() => jsonResponse({ success: true, user: null }));
+
+    const { createDefaultAppKVStore } = await import('@/lib/persistence/browser-kv');
+    createDefaultAppKVStore();
+
+    expect(storage.getItem('maic:account:settings-storage')).toBeNull();
+    expect(storage.getItem('maic:account:user-profile-storage')).toBeNull();
+    expect(storage.getItem('maic:device:learner-key')).toBe('"anon-123"');
   });
 });

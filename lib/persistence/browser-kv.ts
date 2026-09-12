@@ -1,16 +1,18 @@
 /**
  * 浏览器端默认 KVStore 的选择。
  *
- * 服务端持久化由运行时探测决定（不再有构建期开关）：探测 /api/persistence
- * 返回 404（未配 DATABASE_URL）时，与上游一致：纯 localStorage。服务端
- * 可用时，account 作用域改走 `HttpKVStore` → `/api/persistence/kv/...`，
- * 按登录用户（或部署的共享键）分区，设置随账户跨浏览器同步；device
- * 作用域永远留在本机 localStorage。
+ * account 作用域（用户设置，如 `settings-storage`）**只存远端**：服务端
+ * 持久化（DATABASE_URL）可用且当前已登录时走 `HttpKVStore` →
+ * `/api/persistence/kv/...`，按登录用户分区，跨浏览器同步。浏览器本地
+ * 不保留任何 account 副本——没有回退写入，也没有旧数据迁移；切换到该
+ * 模式前留在本机的 `maic:account:*` 键在模块加载时一次性清除（其中含
+ * 明文提供商密钥）。
  *
- * 一次性迁移：切换到服务端 KV 之前，account 值都在本地 localStorage。
- * 远端没有某个键而本地有（旧浏览器）时，首次读取会把本地值回填到服务
- * 端并返回——谁先读到，谁的本地配置成为账户基线，用户无需手动重配。
- * 回填失败不阻塞读取（本会话仍用本地值），下次读取再试。
+ * 两个已知的 no-op 状态：未登录（登录页 / 登出后 / 会话失效）与运行时
+ * 探测到服务端未配置持久化。此时 account 读返回空（store 水合默认值）、
+ * 写静默丢弃——这两种状态下用户本就无设置可写，而请求服务端只会拿到
+ * 401 / 404，被持久化层当成存储故障误报成「更改未被保存」的告警。
+ * device 作用域不受影响，永远留在本机 localStorage。
  */
 import {
   BrowserKVStore,
@@ -29,23 +31,12 @@ import {
 
 const log = createLogger('BrowserKV');
 
-/**
- * 登录认证部署里当前是否未登录（登录页 / 登出后 / 会话已失效）。
- *
- * 未登录时服务端中间件对 /api/persistence 一律 401，那会被持久化层当成
- * 存储故障上报成“更改未被保存”。此时 account 作用域留在本机
- * localStorage：登录 / 注册成功后整页跳转，新页面重新探测认证状态回到
- * 服务端，本地值经既有迁移路径回填。
- */
-
-class AccountMigratingKVStore implements KVStore {
+class AccountServerOnlyKvStore implements KVStore {
   readonly isLocalKVStore = false as const;
   readonly servesDeviceScopeLocally = true as const;
 
-  /** 遗留数据归属标记：本地 account 值属于哪个学习者分区。 */
-  static readonly MIGRATION_OWNER_KEY = '__openmaic:kv-migration-owner';
-  private migrationOwnerKnown = false;
-  private migrationOwnerMatches = false;
+  /** 本会话内已提示过 no-op 写入的键，避免每次写都刷日志。 */
+  static readonly droppedWriteWarned = new Set<string>();
 
   constructor(
     private readonly http: HttpKVStore,
@@ -57,95 +48,85 @@ class AccountMigratingKVStore implements KVStore {
   }
 
   /**
-   * 本地遗留的 account 值是否属于当前登录身份。首个在此浏览器使用服务端
-   * KV 的身份认领遗留数据（标记写入本地）；后来者不匹配则跳过迁移，
-   * 避免把前一个账户的配置（含提供商密钥）带回填到新账户分区。
+   * account 数据的唯一合法去处（服务端 + 已登录会话）本次会话是否可用。
+   * 两个结论并行取得、按页面缓存：冷启动水合的首读与初始化器写竞争，
+   * 串行探测会把「未就绪拒写」的窗口拉长到必现。
    */
-  private async legacyOwnedByCurrentUser(): Promise<boolean> {
-    if (this.migrationOwnerKnown) return this.migrationOwnerMatches;
-    this.migrationOwnerKnown = true;
-    try {
-      const headers = await getPersistenceRequestHeaders();
-      const currentLearner = headers['x-learner-key'];
-      if (!currentLearner) return (this.migrationOwnerMatches = false);
-      const marker = await this.local.get<string>(AccountMigratingKVStore.MIGRATION_OWNER_KEY, 'account');
-      if (marker === null) {
-        await this.local.set(AccountMigratingKVStore.MIGRATION_OWNER_KEY, currentLearner, 'account');
-        return (this.migrationOwnerMatches = true);
-      }
-      this.migrationOwnerMatches = marker === currentLearner;
-    } catch {
-      this.migrationOwnerMatches = false;
-    }
-    return this.migrationOwnerMatches;
+  private async accountReady(): Promise<boolean> {
+    if (!isBrowserPersistenceEnabled()) return false;
+    const [signedOut, serverBacked] = await Promise.all([
+      isLoginAuthSignedOut(),
+      isAccountScopeServerBacked(),
+    ]);
+    return !signedOut && serverBacked;
   }
 
   async get<T>(key: string, scope?: KVScope): Promise<T | null> {
     if (this.isDeviceScope(scope)) return this.local.get<T>(key, 'device');
-    if (await accountScopeStaysLocal()) return this.local.get<T>(key, 'account');
-    const remote = await this.http.get<T>(key);
-    if (remote !== null) return remote;
-    if (!(await this.legacyOwnedByCurrentUser())) return null;
-    const legacy = await this.local.get<T>(key, 'account');
-    if (legacy === null) return null;
-    try {
-      await this.http.set<T>(key, legacy);
-      log.info(`Migrated local account KV entry "${key}" to the server`);
-    } catch (error) {
-      // 回填失败不阻塞本次读取；键仍在本地，下次读取重试。
-      log.warn(`Could not migrate local account KV entry "${key}" to the server:`, error);
-    }
-    return legacy;
+    if (!(await this.accountReady())) return null;
+    return this.http.get<T>(key);
   }
 
   async set<T>(key: string, value: T, scope?: KVScope): Promise<void> {
     if (this.isDeviceScope(scope)) return this.local.set<T>(key, value, 'device');
-    if (await accountScopeStaysLocal()) return this.local.set<T>(key, value, 'account');
+    if (!(await this.accountReady())) {
+      if (!AccountServerOnlyKvStore.droppedWriteWarned.has(key)) {
+        AccountServerOnlyKvStore.droppedWriteWarned.add(key);
+        log.info(
+          `Dropping the account write for "${key}": the server-side account store is not ` +
+            `available in this session (signed out or persistence not configured)`,
+        );
+      }
+      return;
+    }
     return this.http.set<T>(key, value);
   }
 
   async remove(key: string, scope?: KVScope): Promise<void> {
     if (this.isDeviceScope(scope)) return this.local.remove(key, 'device');
-    if (await accountScopeStaysLocal()) {
-      await this.local.remove(key, 'account');
-      return;
-    }
-    await this.http.remove(key);
-    // 同步清掉本地遗留，避免删除的设置经迁移路径复活。
-    await this.local.remove(key, 'account').catch(() => {});
+    if (!(await this.accountReady())) return;
+    return this.http.remove(key);
   }
 
   async keys(prefix = '', scope?: KVScope): Promise<string[]> {
     if (this.isDeviceScope(scope)) return this.local.keys(prefix, 'device');
-    if (await accountScopeStaysLocal()) return this.local.keys(prefix, 'account');
+    if (!(await this.accountReady())) return [];
     return this.http.keys(prefix);
   }
 }
 
 /**
- * account 作用域本次会话留在本机：未登录（服务端会 401，避免误报存储
- * 故障），或运行时探测到服务端未配置持久化（无 DATABASE_URL）。
- * 两个结论并行取得：zustand persist 的首次读在冷启动时与初始化器写
- * 竞争，串行探测会把“未就绪拒写”的窗口拉长到必现。
+ * 一次性清除遗留的本机 account 副本（`<namespace>:account:*`）。
+ *
+ * account 数据只存服务端之后，这些键永远是死数据，且旧值里含明文提供商
+ * 密钥——留在浏览器里纯属负债。不做迁移：按约定，切换后的首次使用允许
+ * 用户重新配置一次。device 键不受影响。fire-and-forget，失败不阻塞加载。
  */
-async function accountScopeStaysLocal(): Promise<boolean> {
-  // 同步标志明确未配置时短路：未配库的部署零网络请求，留在本机。
-  if (!isBrowserPersistenceEnabled()) return true;
-  const [signedOut, serverBacked] = await Promise.all([
-    isLoginAuthSignedOut(),
-    isAccountScopeServerBacked(),
-  ]);
-  return signedOut || !serverBacked;
+function purgeLegacyLocalAccountEntries(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const storage = window.localStorage;
+    const legacy: string[] = [];
+    for (let i = 0; i < storage.length; i++) {
+      const full = storage.key(i);
+      if (full !== null && full.startsWith('maic:account:')) legacy.push(full);
+    }
+    for (const full of legacy) storage.removeItem(full);
+    if (legacy.length > 0) log.info(`Removed ${legacy.length} legacy local account KV entries`);
+  } catch (error) {
+    log.warn('Could not purge legacy local account KV entries:', error);
+  }
 }
 
 export function createDefaultAppKVStore(): KVStore {
+  purgeLegacyLocalAccountEntries();
   const local = new BrowserKVStore();
   const http = new HttpKVStore({
     baseUrl: '/api/persistence',
     deviceStore: local,
-    // 认证头与 runtime/document 相同：authorization 开发令牌 + x-learner-key
-    // （登录模式下服务端以会话为准，忽略客户端头中的身份）。
+    // 认证头与 runtime/document 相同：x-learner-key（登录模式下服务端以
+    // 会话为准，忽略客户端头中的身份）。
     headers: () => getPersistenceRequestHeaders(),
   });
-  return new AccountMigratingKVStore(http, local);
+  return new AccountServerOnlyKvStore(http, local);
 }

@@ -470,9 +470,9 @@ function ambientLocalStorage(): Storage | null {
 function resolveKv(deps: KVPersistDeps): KVStore | null {
   if (deps.kv) return deps.kv;
   if (!ambientLocalStorage()) return null;
-  // 默认后端：服务端持久化启用时 account 作用域走服务器（HttpKVStore），
-  // 否则纯本地（BrowserKVStore）。每次调用时解析，各 store 的模块在 SSR
-  // 中也会加载，彼时绑定后端没有意义。
+  // 默认后端：account 作用域（用户设置）只存服务端（按登录用户分区），
+  // device 作用域留在本机（BrowserKVStore）。各 store 的模块在 SSR 中也会
+  // 加载，彼时绑定后端没有意义，故每次调用时解析。
   return (defaultKv ??= createDefaultAppKVStore());
 }
 

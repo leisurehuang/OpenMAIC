@@ -82,10 +82,10 @@ function probeLoginAuth(): Promise<LoginAuthProbe> {
 /**
  * 登录认证开启且服务端明确报告未登录（登录页 / 登出后 / 会话已失效）。
  *
- * 此时 account 作用域不应再请求服务端 KV：认证中间件对未登录请求一律
- * 401，持久化层会把它当成存储故障，向用户弹出“更改未被保存”的告警。
- * 消费方（browser-kv）据此把 account 读写留在本机 localStorage，登录后
- * 整页跳转重新探测，再回到服务端并走既有迁移路径回填。
+ * 此时 account 数据没有合法去处：认证中间件对未登录请求一律 401，持久化
+ * 层会把它当成存储故障，向用户弹出「更改未被保存」的告警。消费方
+ * （browser-kv）据此把 account 读写变成静默 no-op（读空、写丢弃），
+ * 登录后整页跳转重新探测，回到服务端路径。
  */
 export async function isLoginAuthSignedOut(): Promise<boolean> {
   return (await probeLoginAuth()) === 'signed-out';
